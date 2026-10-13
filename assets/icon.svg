@@ -1,7 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
   <title>TS3 SoundBridge</title>
-  <desc>Two sound waves connected by a bridge.</desc>
-  <rect width="256" height="256" rx="56" fill="#1765d1"/>
-  <path d="M88 78 C88 30 168 30 168 78 M80 188 H176" fill="none" stroke="#5eead4" stroke-width="14" stroke-linecap="round"/>
-  <path d="M64 112 V144 M88 94 V162 M112 118 V138 M112 128 H144 M144 118 V138 M168 94 V162 M192 112 V144" fill="none" stroke="#ffffff" stroke-width="14" stroke-linecap="round"/>
+  <desc>A warm apricot arrow flows through a lavender waveform on a deep violet tile.</desc>
+  <rect width="256" height="256" rx="56" fill="#292341"/>
+  <g fill="none" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M44 112 V173 M101 120 V157 M184 56 V210" stroke="#CDC5F2"/>
+    <path d="M29 166 C47 124 83 112 109 132 S162 171 222 91 M192 97 L222 91 L218 121" stroke="#FFB47A"/>
+    <path d="M73 72 V195 M156 94 V172 M211 111 V164" stroke="#CDC5F2"/>
+  </g>
+  <circle cx="129" cy="121" r="8" fill="#CDC5F2"/>
 </svg>
