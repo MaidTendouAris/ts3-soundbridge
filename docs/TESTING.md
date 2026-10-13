@@ -15,7 +15,16 @@ CTest 四组通过：
 
 1.0.0 同时检查窗口 ICO、菜单 PNG 路径和 GUI 自动检查偏好保存。SVG 经 Direct2D 渲染为七种 PNG 尺寸及 ICO；窗口标题、设置页和插件菜单使用同一设计。安装包版本与 DLL 产品版本一致，并包含 MIT 和第三方声明。
 
-正式 Release 发布前真实 WinHTTP 检查返回 `NoRelease`，与“当前最新”正确区分。发布后的实际检查和 GitHub Actions 构建结果以最终发布验证为准。
+正式 Release 发布前真实 WinHTTP 检查返回 `NoRelease`，与“当前最新”正确区分。发布后返回 `Current`，版本为 `1.0.0`，发布页为本仓库 `releases/tag/v1.0.0`。GUI 手动更新按钮的真实联网验证通过。
+
+GitHub 的 [main 构建检查](https://github.com/MaidTendouAris/ts3-soundbridge/actions/runs/38359537770) 与 [Release 发布工作流](https://github.com/MaidTendouAris/ts3-soundbridge/actions/runs/38359538379) 均成功。正式发布为 [v1.0.0](https://github.com/MaidTendouAris/ts3-soundbridge/releases/tag/v1.0.0)，不是草稿或预发布。
+
+已重新下载正式安装包，核对资产摘要及 `SHA256SUMS.txt`，确认包内 7 个文件；从包中提取实际 DLL，运行 `--capture --updates`，GUI、音频生命周期和手动更新全部通过。该检查使用模拟 TS3 函数表，没有连接频道。
+
+```text
+TS3-SoundBridge-1.0.0-win64.ts3_plugin
+SHA256: dd8e335b7f2f623be3e96f20224b31357fe18415865acc314cb006e9e2981743
+```
 
 真实 Windows 采集结合模拟 TS3 函数表的 `--capture` 测试通过：GUI 开始共享；共享中切换到未运行的选定应用并等待，再切回全部声音；麦克风门控、独立静音、其他服务器隔离、关闭窗口继续共享；TS3 静音、切换标签、断线立即停止；关闭后重载。没有连接服务器，没有调用 TS3 发言配置修改函数。
 

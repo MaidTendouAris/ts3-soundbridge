@@ -6,7 +6,7 @@
 - 中文描述：**TS3 实时声音桥**
 - 建议目录名：`ts3-soundbridge`
 - 文档日期：2026-10-13
-- 当前阶段：1.0.0 正式发布准备；已完成 SVG 图标、GUI、多应用音频、自动／手动更新检查和 GitHub Releases 工作流，源码采用 MIT；真实 TS3 频道测试仍待进行。
+- 当前阶段：1.0.0 已正式发布到 GitHub Releases；SVG 图标、GUI、多应用音频与自动／手动更新检查完成，源码已同步并采用 MIT，GitHub 构建发布通过；真实 TS3 频道测试仍待进行。
 - 文档用途：保存需求、技术判断及待定事项，供新会话继续处理。
 
 ## 1. 原始需求与当前授权范围
@@ -196,11 +196,13 @@ RP-Soundboard 的 `TalkStateManager` 会在播放时临时切换为持续发送�
 这是一个 TeamSpeak 3 客户端插件：实时采集电脑中正在播放的声音，
 排除 TS3 自身进程的播放声音，再与我的麦克风混合后发送到当前频道。
 
-目前有已编译的 0.2.0 Windows x64 插件；通过 GUI 调整设置，
+目前有已发布的 1.0.0 Windows x64 插件；通过 GUI 调整设置，
 可选择全部非 TS3 声音，或同时共享多个指定应用。
 本机 GUI、进程排除、多应用混音和应用重启重新关联测试已通过。
 我当前使用持续发送，要求保留麦克风原有发言规则。
-请先读 README.md、docs/TESTING.md 和本文件第 12 节，再推进真实 TS3
+源码已同步至 https://github.com/MaidTendouAris/ts3-soundbridge，MIT 协议，
+已有 SVG 基准图标和自动／手动 GitHub Releases 更新检查。
+请先读 README.md、docs/TESTING.md 和本文件第 13 节，再推进真实 TS3
 频道测试以及剩余兼容性问题，不要把未完成项视为已经验证通过。
 ```
 
@@ -278,6 +280,8 @@ RP-Soundboard 的 `TalkStateManager` 会在播放时临时切换为持续发送�
 - 版本统一由 CMake 生成，DLL 提供产品版本、版权和 ICO 资源；打包脚本核对版本，安装包包含图标、SVG、MIT 与第三方声明。
 - main／PR 自动构建与四组测试；`vX.Y.Z` 标签在测试通过后发布安装包、SHA-256 与 SVG／PNG／ICO，保留已发布资产。
 
-本机构建、四组自动测试、GUI 图标和更新偏好、真实音频生命周期测试通过；更新 API 在尚无 Release 时正确返回“尚无正式版本”。发布后需再次验证实际最新版本，GitHub Actions 状态与 Release 地址由本次交付确认。
+本机构建、四组自动测试、GUI 图标和更新偏好、真实音频生命周期测试通过；更新 API 在尚无 Release 时返回“尚无正式版本”，发布后正确返回最新版本 1.0.0。main 构建与 Release 工作流均成功。已下载正式安装包、核对 SHA-256，并使用包内实际 DLL 验证 `--capture --updates` 通过。
+
+正式发布：[v1.0.0](https://github.com/MaidTendouAris/ts3-soundbridge/releases/tag/v1.0.0)，包含 `.ts3_plugin`、SHA256SUMS、SVG、PNG 和 ICO。发布标签对应源码提交 `d1bc9cb7c1aa2c18914e7c775e03338a09e903f8`；安装包 SHA-256 为 `dd8e335b7f2f623be3e96f20224b31357fe18415865acc314cb006e9e2981743`。本地 dist 中的 1.0.0 已同步为正式 Release 安装包。
 
 真实 TS3 频道、PTT／VAD、长期音质、设备自动恢复和端到端延迟仍未实测，不因版本号 1.0.0 视为已完成。更新必须完全退出 TS3。
