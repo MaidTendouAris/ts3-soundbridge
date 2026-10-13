@@ -1,0 +1,72 @@
+#pragma code_page(65001)
+#include <windows.h>
+#include <commctrl.h>
+#include "gui_resource.h"
+#include "soundbridge_version.h"
+#include "icon_path.h"
+IDI_SOUNDBRIDGE ICON SOUNDBRIDGE_ICON_PATH
+3 RT_MANIFEST "settings.manifest"
+
+1 VERSIONINFO
+FILEVERSION SOUNDBRIDGE_VERSION_NUMERIC
+PRODUCTVERSION SOUNDBRIDGE_VERSION_NUMERIC
+FILEFLAGSMASK 0x3fL
+FILEFLAGS 0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_DLL
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "MaidTendouAris"
+            VALUE "FileDescription", "TS3 SoundBridge audio sharing plugin"
+            VALUE "FileVersion", SOUNDBRIDGE_VERSION_STRING
+            VALUE "ProductName", "TS3 SoundBridge"
+            VALUE "ProductVersion", SOUNDBRIDGE_VERSION_STRING
+            VALUE "LegalCopyright", "Copyright (c) 2026 MaidTendouAris. MIT License."
+            VALUE "OriginalFilename", "ts3_soundbridge_win64.dll"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END
+
+IDD_SETTINGS DIALOGEX 0, 0, 440, 480
+STYLE DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX
+EXSTYLE WS_EX_APPWINDOW
+CAPTION "TS3 SoundBridge · 设置"
+FONT 9, "Microsoft YaHei UI", 400, 0, 1
+BEGIN
+    ICON IDI_SOUNDBRIDGE, IDC_LOGO, 12, 8, 20, 20
+    LTEXT "选择要分享的声音", IDC_HEADER, 39, 11, 389, 17
+    GROUPBOX "声音来源", -1, 12, 32, 416, 184
+    CONTROL "共享所有非 TeamSpeak 的声音", IDC_MODE_ALL, "Button", BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP, 24, 49, 390, 14
+    CONTROL "只共享选定应用（可多选，包含子进程）", IDC_MODE_SELECTED, "Button", BS_AUTORADIOBUTTON | WS_TABSTOP, 24, 70, 390, 14
+    CONTROL "", IDC_APPS, "SysListView32", LVS_REPORT | LVS_SINGLESEL | WS_TABSTOP | WS_BORDER, 24, 91, 392, 92
+    LTEXT "先打开应用并播放声音，再刷新列表。\n应用重新启动后会自动重新关联。", -1, 24, 190, 251, 22
+    PUSHBUTTON "清除选择", IDC_CLEAR, 280, 190, 63, 18
+    PUSHBUTTON "刷新应用", IDC_REFRESH, 350, 190, 66, 18
+    GROUPBOX "音量", -1, 12, 225, 416, 73
+    LTEXT "共享声音", -1, 24, 244, 57, 14
+    CONTROL "", IDC_DESKTOP_SLIDER, "msctls_trackbar32", TBS_HORZ | TBS_NOTICKS | WS_TABSTOP, 85, 239, 268, 25
+    LTEXT "50%", IDC_DESKTOP_VALUE, 363, 244, 50, 14
+    LTEXT "麦克风", -1, 24, 273, 57, 14
+    CONTROL "", IDC_MIC_SLIDER, "msctls_trackbar32", TBS_HORZ | TBS_NOTICKS | WS_TABSTOP, 85, 268, 268, 25
+    LTEXT "100%", IDC_MIC_VALUE, 363, 273, 50, 14
+    CONTROL "麦克风独立静音（共享声音继续发送）", IDC_MIC_MUTE, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 15, 307, 287, 15
+    CONTROL "显示运行详情", IDC_DETAILS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 325, 307, 103, 15
+    LTEXT "调整后点击“应用设置”。TS3 自带静音、断线或切换服务器会停止共享。", -1, 12, 327, 416, 14
+    LTEXT "共享已关闭。", IDC_STATUS, 12, 345, 416, 26
+    GROUPBOX "版本与更新", -1, 12, 375, 416, 71
+    CONTROL "每天自动检查更新", IDC_AUTO_UPDATE, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 24, 391, 211, 15
+    PUSHBUTTON "检查更新", IDC_CHECK_UPDATE, 246, 389, 80, 19
+    PUSHBUTTON "下载 / 发布页", IDC_DOWNLOAD_UPDATE, 334, 389, 82, 19
+    LTEXT "", IDC_UPDATE_STATUS, 24, 414, 392, 25
+    DEFPUSHBUTTON "开始共享", IDC_START, 12, 455, 98, 20
+    PUSHBUTTON "停止共享", IDC_STOP, 118, 455, 98, 20
+    PUSHBUTTON "应用设置", IDC_APPLY, 224, 455, 98, 20
+    PUSHBUTTON "关闭", IDCANCEL, 330, 455, 98, 20
+END

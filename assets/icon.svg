@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>TS3 SoundBridge</title>
+  <desc>Two sound waves connected by a bridge.</desc>
+  <rect width="256" height="256" rx="56" fill="#1765d1"/>
+  <path d="M88 78 C88 30 168 30 168 78 M80 188 H176" fill="none" stroke="#5eead4" stroke-width="14" stroke-linecap="round"/>
+  <path d="M64 112 V144 M88 94 V162 M112 118 V138 M112 128 H144 M144 118 V138 M168 94 V162 M192 112 V144" fill="none" stroke="#ffffff" stroke-width="14" stroke-linecap="round"/>
+</svg>

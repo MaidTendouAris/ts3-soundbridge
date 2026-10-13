@@ -1,0 +1,37 @@
+name: Publish release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Verify release version
+        shell: pwsh
+        run: |
+          $version = [regex]::Match((Get-Content packaging/package.ini -Raw), '(?m)^Version\s*=\s*([0-9.]+)').Groups[1].Value
+          if ($env:GITHUB_REF_NAME -ne "v$version") { throw 'Tag and package version differ.' }
+          if (!(Test-Path "docs/releases/$version.md")) { throw 'Release notes missing.' }
+      - name: Build and test
+        shell: pwsh
+        run: ./scripts/build.ps1
+      - name: Package installer
+        shell: pwsh
+        run: ./scripts/package.ps1
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          gh release view $env:GITHUB_REF_NAME *> $null
+          if ($LASTEXITCODE -eq 0) { throw 'Release already exists; never replace published installers.' }
+          gh release create $env:GITHUB_REF_NAME "dist/TS3-SoundBridge-$version-win64.ts3_plugin" dist/SHA256SUMS.txt assets/icon.svg assets/icon-256.png assets/soundbridge.ico --verify-tag --title "TS3 SoundBridge $version" --notes-file "docs/releases/$version.md" --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Release publishing failed.' }

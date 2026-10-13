@@ -1,0 +1,1 @@
+#define SOUNDBRIDGE_ICON_PATH "@CMAKE_BINARY_DIR@/icons/soundbridge.ico"
