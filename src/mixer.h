@@ -1,5 +1,6 @@
 #pragma once
 #include "audio_buffer.h"
+#include "audio_levels.h"
 #include <cmath>
 
 namespace soundbridge {
@@ -8,7 +9,10 @@ inline short toPcm16(float value) noexcept {
     value = std::clamp(value, -1.0f, 32767.0f / 32768.0f);
     return static_cast<short>(std::lrint(value * 32768.0f));
 }
-struct MixResult { std::size_t desktopFrames = 0; std::size_t underrunFrames = 0; };
+struct MixResult {
+    std::size_t desktopFrames = 0, underrunFrames = 0;
+    AudioPeaks peaks;
+};
 
 template<std::size_t Capacity>
 MixResult mixSources(AudioBuffer<Capacity>* const* buffers, std::size_t sourceCount, short* samples, int frames, int channels,
@@ -40,6 +44,8 @@ MixResult mixSources(AudioBuffer<Capacity>* const* buffers, std::size_t sourceCo
             const auto index = i * channels + channel;
             const float microphone = microphoneAllowed ? samples[index] / 32768.0f * microphoneGain : 0;
             const float system = channels == 1 ? (left + right) * 0.5f : (channel == 0 ? left : right);
+            result.peaks.microphone = std::max(result.peaks.microphone, std::abs(microphone));
+            result.peaks.desktop = std::max(result.peaks.desktop, std::abs(system));
             samples[index] = toPcm16(microphone + system);
         }
     }

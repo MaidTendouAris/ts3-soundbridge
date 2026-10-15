@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(TS3SoundBridge VERSION 1.0.0 LANGUAGES CXX)
+project(TS3SoundBridge VERSION 1.1.0 LANGUAGES CXX)
 configure_file(src/version.h.in generated/soundbridge_version.h @ONLY)
 configure_file(src/windows/icon_path.h.in generated/icon_path.h @ONLY)
 

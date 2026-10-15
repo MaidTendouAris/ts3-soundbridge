@@ -1,5 +1,6 @@
 #pragma once
 #include "settings.h"
+#include "audio_levels.h"
 #include "windows/applications.h"
 #include "windows/loopback_capture.h"
 #include <condition_variable>
@@ -18,12 +19,14 @@ struct BridgeStatus {
 };
 class BridgeEngine {
 public:
+    struct Levels { AudioPeaks peaks; bool active = false, microphoneMuted = false; };
     using Validator = std::function<bool(std::uint64_t, std::wstring&)>;
     BridgeEngine(Settings settings, Validator validator);
     ~BridgeEngine();
     void apply(Settings settings);
     Settings settings() const;
     BridgeStatus status() const;
+    Levels takeLevels() noexcept;
     void start(std::uint64_t server);
     void stop() noexcept;
     void stopFor(std::uint64_t server) noexcept;
@@ -49,6 +52,7 @@ private:
     std::atomic<bool> closing_{false}, micMuted_{false};
     std::atomic<std::uint64_t> revision_{0}, requestedServer_{0}, activeServer_{0}, activeRevision_{0};
     std::atomic<float> desktopGain_{0.5f}, microphoneGain_{1.0f};
+    PeakAccumulator peaks_;
     std::atomic<std::uint64_t> callbacks_{0}, mixedFrames_{0}, underruns_{0};
 };
 }

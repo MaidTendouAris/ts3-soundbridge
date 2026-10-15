@@ -4,6 +4,7 @@
 #include <cstdint>
 
 namespace soundbridge {
+inline constexpr int MaximumGainPercent = 300;
 enum class CaptureMode { AllOtherAudio, SelectedApplications };
 struct Settings {
     CaptureMode mode = CaptureMode::AllOtherAudio;

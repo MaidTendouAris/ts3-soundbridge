@@ -94,6 +94,46 @@ int main() {
         check(pcm[0] == 2000 && pcm[1] == 2000, "sum sources before saturation");
     }
     check(toPcm16(std::numeric_limits<float>::quiet_NaN()) == 0, "invalid sample becomes silence");
+    {
+        AudioBuffer<8> buffer;
+        buffer.push({0.5f, -0.25f}); short pcm[] = {-16384, 8192}; int flags = 2;
+        const auto result = mix(buffer, pcm, 1, 2, flags, 3, 2, false);
+        check(result.peaks.desktop == 1.5f && result.peaks.microphone == 1.0f,
+            "separate post-gain peaks retain overload before mixing/clipping");
+        check(pcm[0] == 16384 && pcm[1] == -8192, "opposing signals do not hide individual source levels");
+        buffer.push({0.25f, -0.25f}); short mono = 12345; flags = 0;
+        const auto silent = mix(buffer, &mono, 1, 1, flags, 3, 3, false);
+        check(silent.peaks.desktop == 0 && silent.peaks.microphone == 0, "meter follows actual mono downmix and native microphone gate");
+        buffer.push({0.1f, 0.1f}); mono = 4096; flags = 2;
+        const auto triple = mix(buffer, &mono, 1, 1, flags, 3, 3, false);
+        check(std::abs(triple.peaks.desktop - 0.3f) < 0.00001f && triple.peaks.microphone == 0.375f && mono == 22118,
+            "300 percent gains affect both meters and actual PCM");
+        buffer.push({0.9f, 0.9f}); mono = 20000; flags = 2;
+        const auto muted = mix(buffer, &mono, 1, 1, flags, 0, 3, true);
+        check(muted.peaks.desktop == 0 && muted.peaks.microphone == 0 && mono == 0, "zero gain and independent mute silence corresponding meters");
+        AudioBuffer<8> second; AudioBuffer<8>* sources[] = {&buffer, &second};
+        buffer.push({0.5f, 0.5f}); second.push({-0.5f, -0.5f}); flags = 2;
+        const auto cancelled = mixSources(sources, 2, &mono, 1, 1, flags, 3, 0, false);
+        check(cancelled.peaks.desktop == 0, "shared meter measures sum of applications rather than loudest application");
+    }
+    {
+        PeakAccumulator accumulator;
+        accumulator.publish({0.8f, 0.2f}); accumulator.publish({0.1f, 1.5f});
+        const auto peaks = accumulator.take();
+        check(peaks.desktop == 0.8f && peaks.microphone == 1.5f, "short peaks survive between GUI polls independently");
+        const auto silent = accumulator.take();
+        check(silent.desktop == 0 && silent.microphone == 0, "no callbacks cannot retain stale peaks");
+        check(meterPosition(0) == 0 && meterPosition(0.001f) == 0 && meterPosition(0.1f) == 400 && meterPosition(3) == 600,
+            "meters share logarithmic scale and saturate display at full scale");
+        check(std::abs(peakDb(3) - 9.542425f) < 0.0001f, "overload readout preserves positive dBFS");
+        MeterEnvelope envelope;
+        check(envelope.update(1, 0) == 1, "meter attacks immediately");
+        check(std::abs(envelope.update(0, 0.5f) - 0.2511886f) < 0.0001f, "meter decays at 24 dB per second when audio callbacks stop");
+        check(envelope.update(0, 5) == 0, "meter eventually returns to silence");
+        envelope.update(1, 0); envelope.reset();
+        check(envelope.update(0, 0) == 0, "stopping resets display without a stale tail");
+        check(envelope.update(0.0001f, 0) == 0.0001f, "quiet nonzero input retains an honest numeric readout below the bar scale");
+    }
     if (failures) return 1;
     std::cout << "All audio core tests passed.\n"; return 0;
 }

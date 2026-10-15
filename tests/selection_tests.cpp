@@ -37,11 +37,17 @@ int main() {
     const auto loaded = loadSettings(file);
     check(loaded.mode == settings.mode && loaded.desktopPercent == 73 && loaded.microphonePercent == 42 &&
         loaded.microphoneMuted && loaded.applications == settings.applications, "Unicode configuration round trip");
-    WritePrivateProfileStringW(L"SoundBridge", L"DesktopPercent", L"999999", file.c_str());
+    settings.desktopPercent = 300; settings.microphonePercent = 275;
+    check(saveSettings(file, settings), "save expanded gains");
+    check(loadSettings(file).desktopPercent == 300 && loadSettings(file).microphonePercent == 275, "expanded gain range survives persistence");
+    WritePrivateProfileStringW(L"SoundBridge", L"DesktopPercent", L"301", file.c_str());
     WritePrivateProfileStringW(L"SoundBridge", L"MicrophonePercent", L"-1", file.c_str());
     check(loadSettings(file).desktopPercent == 50 && loadSettings(file).microphonePercent == 100, "invalid gain uses safe defaults");
     DeleteFileW(file.c_str());
     BridgeEngine engine(settings, [](std::uint64_t, std::wstring& problem) { problem = L"disconnected"; return false; });
+    check(engine.settings().desktopPercent == 300 && engine.settings().microphonePercent == 275, "engine retains expanded gains");
+    auto outOfRange = settings; outOfRange.desktopPercent = 999; outOfRange.microphonePercent = -1; engine.apply(outOfRange);
+    check(engine.settings().desktopPercent == 300 && engine.settings().microphonePercent == 0, "engine bounds expanded gains");
     check(engine.requestedServer() == 0, "loading settings never starts sharing");
     short sample = 1234; int flags = 2; engine.edit(42, &sample, 1, 1, &flags);
     check(sample == 1234 && flags == 2, "inactive engine preserves voice");

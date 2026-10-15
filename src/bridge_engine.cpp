@@ -23,8 +23,8 @@ BridgeEngine::~BridgeEngine() {
     if (worker_.joinable()) worker_.join();
 }
 void BridgeEngine::apply(Settings settings) {
-    settings.desktopPercent = std::clamp(settings.desktopPercent, 0, 200);
-    settings.microphonePercent = std::clamp(settings.microphonePercent, 0, 200);
+    settings.desktopPercent = std::clamp(settings.desktopPercent, 0, MaximumGainPercent);
+    settings.microphonePercent = std::clamp(settings.microphonePercent, 0, MaximumGainPercent);
     bool routesChanged;
     {
         std::lock_guard<std::mutex> lock(settingsMutex_);
@@ -40,6 +40,16 @@ void BridgeEngine::apply(Settings settings) {
 }
 Settings BridgeEngine::settings() const { std::lock_guard<std::mutex> lock(settingsMutex_); return settings_; }
 BridgeStatus BridgeEngine::status() const { std::lock_guard<std::mutex> lock(statusMutex_); return status_; }
+BridgeEngine::Levels BridgeEngine::takeLevels() noexcept {
+    Levels result;
+    result.peaks = peaks_.take();
+    const auto server = requestedServer_.load();
+    result.active = server && activeServer_.load() == server && activeRevision_.load() == revision_.load();
+    result.microphoneMuted = micMuted_.load();
+    if (!result.active) result.peaks = {};
+    if (result.microphoneMuted) result.peaks.microphone = 0;
+    return result;
+}
 void BridgeEngine::start(std::uint64_t server) {
     activeServer_.store(0); requestedServer_.store(server);
     callbacks_.store(0); mixedFrames_.store(0); underruns_.store(0);
@@ -72,7 +82,7 @@ void BridgeEngine::setStatus(BridgePhase phase, const std::wstring& message) {
 void BridgeEngine::clearSources() {
     activeServer_.store(0);
     std::vector<std::unique_ptr<Source>> old;
-    { std::lock_guard<std::mutex> lock(audioMutex_); old.swap(sources_); }
+    { std::lock_guard<std::mutex> lock(audioMutex_); old.swap(sources_); peaks_.reset(); }
     // Joining capture threads takes place outside the audio-callback mutex.
     old.clear();
 }
@@ -191,6 +201,7 @@ void BridgeEngine::edit(std::uint64_t server, short* samples, int frames, int ch
     for (const auto& source : sources_) if (source->capture.running() && count < 16) buffers[count++] = &source->buffer;
     const auto result = mixSources(buffers, count, samples, frames, channels, *flags,
         desktopGain_.load(), microphoneGain_.load(), micMuted_.load());
+    peaks_.publish(result.peaks);
     callbacks_.fetch_add(1, std::memory_order_relaxed); mixedFrames_.fetch_add(result.desktopFrames, std::memory_order_relaxed);
     underruns_.fetch_add(result.underrunFrames, std::memory_order_relaxed);
 }

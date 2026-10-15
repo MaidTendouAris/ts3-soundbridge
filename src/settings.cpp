@@ -13,7 +13,7 @@ Settings loadSettings(const std::wstring& file) {
         CaptureMode::SelectedApplications : CaptureMode::AllOtherAudio;
     const auto readGain = [&](const wchar_t* key, int fallback) {
         const UINT value = GetPrivateProfileIntW(L"SoundBridge", key, fallback, file.c_str());
-        return value <= 200 ? static_cast<int>(value) : fallback;
+        return value <= MaximumGainPercent ? static_cast<int>(value) : fallback;
     };
     settings.desktopPercent = readGain(L"DesktopPercent", 50);
     settings.microphonePercent = readGain(L"MicrophonePercent", 100);
@@ -45,8 +45,8 @@ bool saveSettings(const std::wstring& file, const Settings& settings) {
         if (!WritePrivateProfileStringW(section, key, value.c_str(), file.c_str())) success = false;
     };
     write(L"SoundBridge", L"Mode", settings.mode == CaptureMode::SelectedApplications ? L"1" : L"0");
-    write(L"SoundBridge", L"DesktopPercent", std::to_wstring(std::clamp(settings.desktopPercent, 0, 200)));
-    write(L"SoundBridge", L"MicrophonePercent", std::to_wstring(std::clamp(settings.microphonePercent, 0, 200)));
+    write(L"SoundBridge", L"DesktopPercent", std::to_wstring(std::clamp(settings.desktopPercent, 0, MaximumGainPercent)));
+    write(L"SoundBridge", L"MicrophonePercent", std::to_wstring(std::clamp(settings.microphonePercent, 0, MaximumGainPercent)));
     write(L"SoundBridge", L"MicrophoneMuted", settings.microphoneMuted ? L"1" : L"0");
     write(L"SoundBridge", L"AutoCheckUpdates", settings.autoCheckUpdates ? L"1" : L"0");
     if (!WritePrivateProfileStringW(L"Applications", nullptr, nullptr, file.c_str())) success = false;

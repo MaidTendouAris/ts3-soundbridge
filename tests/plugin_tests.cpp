@@ -6,6 +6,7 @@
 #include <teamspeak/public_errors.h>
 #include "windows/gui_resource.h"
 #include <atomic>
+#include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -128,6 +129,11 @@ int main(int argc, char** argv) {
         configure(nullptr, nullptr);
         if (!wait([] { return dialog() && IsWindowVisible(dialog()); })) throw std::runtime_error("Settings GUI did not open");
         const auto window = dialog();
+        check(SendDlgItemMessageW(window, IDC_DESKTOP_SLIDER, TBM_GETRANGEMAX, 0, 0) == 300 &&
+              SendDlgItemMessageW(window, IDC_MIC_SLIDER, TBM_GETRANGEMAX, 0, 0) == 300, "both GUI gains allow 300 percent");
+        check(GetDlgItem(window, IDC_DESKTOP_METER) && GetDlgItem(window, IDC_MIC_METER), "separate shared-audio and microphone meters exist");
+        check(SendDlgItemMessageW(window, IDC_DESKTOP_METER, PBM_GETPOS, 0, 0) == 0 &&
+              SendDlgItemMessageW(window, IDC_MIC_METER, PBM_GETPOS, 0, 0) == 0, "inactive meters show silence");
         check(SendMessageW(window, WM_GETICON, ICON_BIG, 0) != 0, "SVG-derived window icon");
         check(IsDlgButtonChecked(window, IDC_AUTO_UPDATE) == BST_UNCHECKED, "saved update preference loaded");
         click(window, IDC_AUTO_UPDATE); click(window, IDC_APPLY);
@@ -150,6 +156,11 @@ int main(int argc, char** argv) {
         check(GetPrivateProfileIntW(L"SoundBridge", L"Mode", 0, file.c_str()) == 1, "GUI selected mode persisted");
         check(GetPrivateProfileIntW(L"Applications", L"Count", 0, file.c_str()) == 2, "multiple GUI application checkboxes saved together");
         click(window, IDC_MODE_ALL);
+        SendDlgItemMessageW(window, IDC_DESKTOP_SLIDER, TBM_SETPOS, TRUE, 300);
+        SendDlgItemMessageW(window, IDC_MIC_SLIDER, TBM_SETPOS, TRUE, 300);
+        SendMessageW(window, WM_HSCROLL, 0, 0); click(window, IDC_APPLY);
+        check(GetPrivateProfileIntW(L"SoundBridge", L"DesktopPercent", 0, file.c_str()) == 300 &&
+              GetPrivateProfileIntW(L"SoundBridge", L"MicrophonePercent", 0, file.c_str()) == 300, "GUI saves expanded gains without clamping at 200 percent");
         SendDlgItemMessageW(window, IDC_DESKTOP_SLIDER, TBM_SETPOS, TRUE, 0);
         SendDlgItemMessageW(window, IDC_MIC_SLIDER, TBM_SETPOS, TRUE, 50);
         SendMessageW(window, WM_HSCROLL, 0, 0); click(window, IDC_APPLY);
@@ -162,6 +173,18 @@ int main(int argc, char** argv) {
             muted.store(0); click(window, IDC_START);
             const auto active = [&] { short value = 10000; int bits = 2; edit(42, &value, 1, 1, &bits); return value == 5000 && bits == 3; };
             if (!wait(active)) throw std::runtime_error("Real capture did not start against mocked SDK");
+            SendDlgItemMessageW(window, IDC_MIC_SLIDER, TBM_SETPOS, TRUE, 300); click(window, IDC_APPLY);
+            check(wait([&] {
+                short value = 16000; int bits = 2; edit(42, &value, 1, 1, &bits);
+                return value == 32767 && SendDlgItemMessageW(window, IDC_MIC_METER, PBM_GETPOS, 0, 0) == 600;
+            }), "real callback applies 300 percent and meter exposes pre-clipping overload");
+            wchar_t level[64]{}; GetDlgItemTextW(window, IDC_MIC_LEVEL, level, 64);
+            check(level[0] == L'+' && SendDlgItemMessageW(window, IDC_DESKTOP_METER, PBM_GETPOS, 0, 0) == 0,
+                "microphone readout is positive dBFS while zero-gain shared meter remains silent");
+            click(window, IDC_MIC_MUTE); click(window, IDC_APPLY);
+            check(wait([&] { return SendDlgItemMessageW(window, IDC_MIC_METER, PBM_GETPOS, 0, 0) == 0; }), "independent mute clears microphone meter immediately");
+            click(window, IDC_MIC_MUTE);
+            SendDlgItemMessageW(window, IDC_MIC_SLIDER, TBM_SETPOS, TRUE, 50); click(window, IDC_APPLY);
             click(window, IDC_MODE_SELECTED); click(window, IDC_APPLY);
             check(wait([&] { return status(window).find(L"等待所选应用") != std::wstring::npos; }), "active mode switch releases all-audio capture and waits for selected apps");
             click(window, IDC_MODE_ALL); click(window, IDC_APPLY);
@@ -185,6 +208,8 @@ int main(int argc, char** argv) {
             menu(42, PLUGIN_MENU_TYPE_GLOBAL, 2, 0); disconnect(42, STATUS_DISCONNECTED, 0);
             pcm = 10000; flags = 2; edit(42, &pcm, 1, 1, &flags);
             check(pcm == 10000 && flags == 2, "disconnect stops sharing");
+            check(wait([&] { return SendDlgItemMessageW(window, IDC_MIC_METER, PBM_GETPOS, 0, 0) == 0 &&
+                SendDlgItemMessageW(window, IDC_DESKTOP_METER, PBM_GETPOS, 0, 0) == 0; }), "disconnect clears both meters");
         }
         menu(42, PLUGIN_MENU_TYPE_GLOBAL, 3, 0);
         if (liveUpdates) {
@@ -193,11 +218,26 @@ int main(int argc, char** argv) {
                 const std::wstring result = text; return result.find(L"最新正式版本") != std::wstring::npos || result.find(L"尚无公开") != std::wstring::npos; }), "GUI manual update button reaches live GitHub release result");
         }
         if (!imagePath.empty()) {
-            click(window, IDC_MODE_SELECTED); click(window, IDC_DETAILS);
+            click(window, capture ? IDC_MODE_ALL : IDC_MODE_SELECTED); click(window, IDC_DETAILS);
             SendDlgItemMessageW(window, IDC_DESKTOP_SLIDER, TBM_SETPOS, TRUE, 50);
             SendDlgItemMessageW(window, IDC_MIC_SLIDER, TBM_SETPOS, TRUE, 100);
+            CheckDlgButton(window, IDC_MIC_MUTE, BST_UNCHECKED);
             SendMessageW(window, WM_HSCROLL, 0, 0); click(window, IDC_APPLY); Sleep(100);
+            if (capture) {
+                connected.store(true); muted.store(0); click(window, IDC_START);
+                check(wait([&] {
+                    short value = 10000; int bits = 2; edit(42, &value, 1, 1, &bits); return (bits & 1) != 0;
+                }), "capture active for live meter screenshot");
+                // Drive the production callback at its normal frame cadence.
+                // An optional sibling probe can provide a short desktop test tone.
+                for (int i = 0; i < 50; ++i) {
+                    short values[480]; std::fill_n(values, 480, static_cast<short>(10000));
+                    int bits = 2; edit(42, values, 480, 1, &bits); Sleep(10);
+                }
+                check(SendDlgItemMessageW(window, IDC_MIC_METER, PBM_GETPOS, 0, 0) > 0, "live microphone meter visible");
+            }
             check(screenshot(window, std::filesystem::absolute(imagePath).wstring()), "GUI screenshot rendered");
+            if (capture) click(window, IDC_STOP);
         }
         shutdown(); check(!IsWindow(window), "shutdown joins GUI and destroys window");
         check(init() == 0, "reload after GUI shutdown"); configure(nullptr, nullptr);

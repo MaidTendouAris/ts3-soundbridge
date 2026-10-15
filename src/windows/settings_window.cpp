@@ -5,6 +5,7 @@
 #include <shellapi.h>
 #include "soundbridge_version.h"
 #include <algorithm>
+#include <iomanip>
 #include <sstream>
 
 namespace soundbridge {
@@ -48,7 +49,7 @@ void SettingsWindow::run() {
     GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
         reinterpret_cast<LPCWSTR>(&windowModuleAddress), &module);
     ThemeScope theme(module);
-    INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_LISTVIEW_CLASSES | ICC_BAR_CLASSES};
+    INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_LISTVIEW_CLASSES | ICC_BAR_CLASSES | ICC_PROGRESS_CLASS};
     InitCommonControlsEx(&controls);
     const auto dialog = CreateDialogParamW(module, MAKEINTRESOURCEW(IDD_SETTINGS), nullptr, procedure, reinterpret_cast<LPARAM>(this));
     if (!dialog) return;
@@ -77,6 +78,7 @@ INT_PTR CALLBACK SettingsWindow::procedure(HWND dialog, UINT message, WPARAM wpa
 INT_PTR SettingsWindow::handle(HWND dialog, UINT message, WPARAM wparam, LPARAM) {
     switch (message) {
     case WM_INITDIALOG: {
+        SetDlgItemTextW(dialog, IDC_UPDATE_GROUP, L"版本 " SOUNDBRIDGE_VERSION_WSTRING L" · 更新");
         HMODULE module = nullptr;
         GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, reinterpret_cast<LPCWSTR>(&windowModuleAddress), &module);
         const auto dpi = GetDpiForWindow(dialog);
@@ -97,11 +99,20 @@ INT_PTR SettingsWindow::handle(HWND dialog, UINT message, WPARAM wparam, LPARAM)
             ListView_InsertColumn(list, i, &column);
         }
         for (int id : {IDC_DESKTOP_SLIDER, IDC_MIC_SLIDER}) {
-            SendDlgItemMessageW(dialog, id, TBM_SETRANGE, TRUE, MAKELPARAM(0, 200));
+            SendDlgItemMessageW(dialog, id, TBM_SETRANGE, TRUE, MAKELPARAM(0, MaximumGainPercent));
             SendDlgItemMessageW(dialog, id, TBM_SETPAGESIZE, 0, 10);
+        }
+        for (int id : {IDC_DESKTOP_METER, IDC_MIC_METER}) {
+            const auto meter = GetDlgItem(dialog, id);
+            // Disable themed animation: each position represents the latest audio
+            // interval, rather than an animated progress toward a target value.
+            SetWindowTheme(meter, L"", L"");
+            SendMessageW(meter, PBM_SETRANGE32, 0, 600);
+            SendMessageW(meter, PBM_SETBKCOLOR, 0, RGB(230, 232, 238));
         }
         fitToScreen(); fill(engine_.settings());
         SetTimer(dialog, 1, 500, nullptr);
+        SetTimer(dialog, 2, 50, nullptr);
         return TRUE;
     }
     case WM_SB_SHOW:
@@ -109,8 +120,11 @@ INT_PTR SettingsWindow::handle(HWND dialog, UINT message, WPARAM wparam, LPARAM)
         ShowWindow(dialog, SW_RESTORE); SetForegroundWindow(dialog); return TRUE;
     case WM_SB_SHUTDOWN: DestroyWindow(dialog); return TRUE;
     case WM_CLOSE: ShowWindow(dialog, SW_HIDE); return TRUE;
-    case WM_DESTROY: KillTimer(dialog, 1); PostQuitMessage(0); return TRUE;
-    case WM_TIMER: updateStatus(); updateUpdateStatus(); return TRUE;
+    case WM_DESTROY: KillTimer(dialog, 1); KillTimer(dialog, 2); PostQuitMessage(0); return TRUE;
+    case WM_TIMER:
+        if (wparam == 2) updateLevels();
+        else if (wparam == 1) { updateStatus(); updateUpdateStatus(); }
+        return TRUE;
     case WM_HSCROLL: updateLabels(); return TRUE;
     case WM_COMMAND:
         switch (LOWORD(wparam)) {
@@ -141,13 +155,14 @@ INT_PTR SettingsWindow::handle(HWND dialog, UINT message, WPARAM wparam, LPARAM)
 }
 void SettingsWindow::fill(const Settings& settings) {
     const auto window = window_.load();
+    engine_.takeLevels(); desktopMeter_.reset(); microphoneMeter_.reset(); meterTick_ = GetTickCount64();
     notice_.clear(); noticeUntil_ = 0;
     CheckRadioButton(window, IDC_MODE_ALL, IDC_MODE_SELECTED, settings.mode == CaptureMode::SelectedApplications ? IDC_MODE_SELECTED : IDC_MODE_ALL);
     SendDlgItemMessageW(window, IDC_DESKTOP_SLIDER, TBM_SETPOS, TRUE, settings.desktopPercent);
     SendDlgItemMessageW(window, IDC_MIC_SLIDER, TBM_SETPOS, TRUE, settings.microphonePercent);
     CheckDlgButton(window, IDC_MIC_MUTE, settings.microphoneMuted ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(window, IDC_AUTO_UPDATE, settings.autoCheckUpdates ? BST_CHECKED : BST_UNCHECKED);
-    refreshApplications(settings.applications); updateLabels(); updateMode(); updateStatus(); updateUpdateStatus();
+    refreshApplications(settings.applications); updateLabels(); updateMode(); updateStatus(); updateUpdateStatus(); updateLevels();
 }
 Settings SettingsWindow::draft() const {
     const auto window = window_.load();
@@ -210,6 +225,35 @@ void SettingsWindow::updateLabels() {
     const auto microphone = std::to_wstring(SendDlgItemMessageW(window, IDC_MIC_SLIDER, TBM_GETPOS, 0, 0)) + L"%";
     SetDlgItemTextW(window, IDC_DESKTOP_VALUE, desktop.c_str()); SetDlgItemTextW(window, IDC_MIC_VALUE, microphone.c_str());
 }
+void SettingsWindow::updateLevels() {
+    const auto window = window_.load();
+    const auto reading = engine_.takeLevels();
+    const auto now = GetTickCount64();
+    const float elapsed = static_cast<float>(now - meterTick_) / 1000.0f; meterTick_ = now;
+    if (!reading.active || !IsWindowVisible(window) || IsIconic(window)) {
+        desktopMeter_.reset(); microphoneMeter_.reset();
+    }
+    if (reading.microphoneMuted) microphoneMeter_.reset();
+    const auto desktop = desktopMeter_.update(reading.peaks.desktop, elapsed);
+    const auto microphone = microphoneMeter_.update(reading.peaks.microphone, elapsed);
+    const auto draw = [&](int meter, int label, float peak) {
+        const float db = peakDb(peak);
+        const auto color = db >= 0 ? RGB(210, 67, 67) : db >= -12 ? RGB(196, 140, 32) : RGB(41, 151, 97);
+        SendDlgItemMessageW(window, meter, PBM_SETBARCOLOR, 0, color);
+        SendDlgItemMessageW(window, meter, PBM_SETPOS, meterPosition(peak), 0);
+        std::wstring text = L"−∞ dBFS";
+        if (peak > 0) {
+            std::wostringstream value;
+            if (db > 0) value << L'+';
+            value << std::fixed << std::setprecision(1) << db << L" dBFS";
+            text = value.str();
+        }
+        wchar_t previous[64]{}; GetDlgItemTextW(window, label, previous, 64);
+        if (text != previous) SetDlgItemTextW(window, label, text.c_str());
+    };
+    draw(IDC_DESKTOP_METER, IDC_DESKTOP_LEVEL, desktop);
+    draw(IDC_MIC_METER, IDC_MIC_LEVEL, microphone);
+}
 void SettingsWindow::updateStatus() {
     const auto window = window_.load();
     if (noticeUntil_ && GetTickCount64() >= noticeUntil_) { notice_.clear(); noticeUntil_ = 0; }
@@ -228,7 +272,7 @@ void SettingsWindow::updateStatus() {
 }
 void SettingsWindow::updateUpdateStatus() {
     const auto result = updates_.status(); const auto window = window_.load();
-    SetDlgItemTextW(window, IDC_UPDATE_STATUS, (std::wstring(L"当前版本 " SOUNDBRIDGE_VERSION_WSTRING L"\n") + result.message).c_str());
+    SetDlgItemTextW(window, IDC_UPDATE_STATUS, result.message.c_str());
     EnableWindow(GetDlgItem(window, IDC_CHECK_UPDATE), result.phase != UpdatePhase::Checking);
 }
 void SettingsWindow::fitToScreen() {
