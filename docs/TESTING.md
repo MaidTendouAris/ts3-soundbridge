@@ -12,6 +12,15 @@ Release x64 编译及四组 CTest 通过。新增验证涵盖：
 
 按用户反馈改为左右双栏：左侧来源／应用，右侧增益／电平／更新，底部共享／应用设置按钮；不再纵向堆叠。当前 1440P 环境下窗口由 988×1358 缩为 1233×877 像素，高度减少约 35%，控件与数值完整可见。新图标也随 1.1.0 安装包分发。
 
+GitHub 的 [1.1.0 构建检查](https://github.com/MaidTendouAris/ts3-soundbridge/actions/runs/38775112876) 与 [正式发布工作流](https://github.com/MaidTendouAris/ts3-soundbridge/actions/runs/38775118752) 均成功。正式 [v1.1.0](https://github.com/MaidTendouAris/ts3-soundbridge/releases/tag/v1.1.0) 不是草稿或预发布。
+
+重新下载正式安装包，核对 GitHub 资产摘要、SHA256SUMS、7 文件结构、安装元数据与 DLL 版本 1.1.0，确认包含新版 SVG。提取包内实际 DLL 后运行 `--capture --updates`，电平、300% 增益、GUI／音频生命周期与真实手动更新检查通过。本地 dist 的 1.1.0 同步为该正式包：
+
+```text
+TS3-SoundBridge-1.1.0-win64.ts3_plugin
+SHA256: 219dbd2985441c35a259adae27f56140a9d245b94668c0582cdb51c1edcb6cfc
+```
+
 真实 TS3 频道听感、PTT／VAD、长期音质和设备自动恢复仍未实测。以下保留 1.0.0 的历史验证与包校验记录。
 
 ## 1.0.0 历史记录
