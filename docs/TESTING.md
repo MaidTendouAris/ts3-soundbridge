@@ -11,6 +11,15 @@ Release x64 及四组自动测试通过；真实 Windows 回环配合模拟 TS3 
 - 圆点位于 SVG 的 (128, 128)，调整邻近曲线保留间隙，重新导出 PNG 与七尺寸 ICO；窗口保持 1.1.0 的紧凑双栏尺寸。
 - 发布工作流仅上传安装包及 `SHA256SUMS.txt`，图标保留在源码及插件资源内。
 
+GitHub [构建检查](https://github.com/MaidTendouAris/ts3-soundbridge/actions/runs/38861926903) 与 [发布工作流](https://github.com/MaidTendouAris/ts3-soundbridge/actions/runs/38861931386) 均成功，正式发布为 [v1.1.1](https://github.com/MaidTendouAris/ts3-soundbridge/releases/tag/v1.1.1)。API 确认仅上传安装包及校验文件，没有独立 SVG／PNG／ICO 附件。
+
+已下载正式包，核对资产摘要、SHA256SUMS、7 文件结构、1.1.1 版本及居中 SVG；包内实际 DLL 的 `--capture --updates` 验证开关、最小化恢复、音频与手动更新通过。本地 dist 已同步为正式包：
+
+```text
+TS3-SoundBridge-1.1.1-win64.ts3_plugin
+SHA256: 706fc977e7734e2a8efc5b1187699f856c3051648e071b7caa8f1c888da27a3c
+```
+
 以下为历史验证记录；真实 TS3 频道、PTT／VAD、长期听感与设备自动恢复仍未实测。
 
 ## 1.1.0（2026-10-16）
