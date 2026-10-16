@@ -132,6 +132,15 @@ int main(int argc, char** argv) {
         check(SendDlgItemMessageW(window, IDC_DESKTOP_SLIDER, TBM_GETRANGEMAX, 0, 0) == 300 &&
               SendDlgItemMessageW(window, IDC_MIC_SLIDER, TBM_GETRANGEMAX, 0, 0) == 300, "both GUI gains allow 300 percent");
         check(GetDlgItem(window, IDC_DESKTOP_METER) && GetDlgItem(window, IDC_MIC_METER), "separate shared-audio and microphone meters exist");
+        check(IsDlgButtonChecked(window, IDC_SHOW_METERS) == BST_UNCHECKED && !IsWindowVisible(GetDlgItem(window, IDC_MIC_METER)),
+            "meter display defaults off and bars are hidden");
+        SendDlgItemMessageW(window, IDC_MIC_SLIDER, TBM_SETPOS, TRUE, 250);
+        click(window, IDC_SHOW_METERS);
+        check(IsWindowVisible(GetDlgItem(window, IDC_MIC_METER)) && GetPrivateProfileIntW(L"SoundBridge", L"ShowLevelMeters", 0, file.c_str()) == 1,
+            "display toggle takes effect and saves immediately");
+        check(GetPrivateProfileIntW(L"SoundBridge", L"MicrophonePercent", 0, file.c_str()) == 100,
+            "display toggle does not apply unrelated gain drafts");
+        SendDlgItemMessageW(window, IDC_MIC_SLIDER, TBM_SETPOS, TRUE, 100);
         check(SendDlgItemMessageW(window, IDC_DESKTOP_METER, PBM_GETPOS, 0, 0) == 0 &&
               SendDlgItemMessageW(window, IDC_MIC_METER, PBM_GETPOS, 0, 0) == 0, "inactive meters show silence");
         check(SendMessageW(window, WM_GETICON, ICON_BIG, 0) != 0, "SVG-derived window icon");
@@ -176,11 +185,28 @@ int main(int argc, char** argv) {
             SendDlgItemMessageW(window, IDC_MIC_SLIDER, TBM_SETPOS, TRUE, 300); click(window, IDC_APPLY);
             check(wait([&] {
                 short value = 16000; int bits = 2; edit(42, &value, 1, 1, &bits);
-                return value == 32767 && SendDlgItemMessageW(window, IDC_MIC_METER, PBM_GETPOS, 0, 0) == 600;
+                wchar_t readout[64]{}; GetDlgItemTextW(window, IDC_MIC_LEVEL, readout, 64);
+                return value == 32767 && SendDlgItemMessageW(window, IDC_MIC_METER, PBM_GETPOS, 0, 0) == 600 && readout[0] == L'+';
             }), "real callback applies 300 percent and meter exposes pre-clipping overload");
             wchar_t level[64]{}; GetDlgItemTextW(window, IDC_MIC_LEVEL, level, 64);
             check(level[0] == L'+' && SendDlgItemMessageW(window, IDC_DESKTOP_METER, PBM_GETPOS, 0, 0) == 0,
                 "microphone readout is positive dBFS while zero-gain shared meter remains silent");
+            click(window, IDC_SHOW_METERS);
+            short unaffected = 16000; int unaffectedBits = 2; edit(42, &unaffected, 1, 1, &unaffectedBits);
+            check(!IsWindowVisible(GetDlgItem(window, IDC_MIC_METER)) && SendDlgItemMessageW(window, IDC_MIC_METER, PBM_GETPOS, 0, 0) == 0 &&
+                unaffected == 32767 && GetPrivateProfileIntW(L"SoundBridge", L"ShowLevelMeters", 1, file.c_str()) == 0,
+                "disabling display clears/hides meters and preserves active gain/audio");
+            click(window, IDC_SHOW_METERS);
+            ShowWindow(window, SW_MINIMIZE);
+            check(wait([&] { return IsIconic(window) && SendDlgItemMessageW(window, IDC_MIC_METER, PBM_GETPOS, 0, 0) == 0; }),
+                "minimizing suspends and clears meter display");
+            unaffected = 16000; unaffectedBits = 2; edit(42, &unaffected, 1, 1, &unaffectedBits);
+            check(unaffected == 32767, "minimizing preserves audio gain and sharing");
+            ShowWindow(window, SW_RESTORE);
+            check(wait([&] {
+                short value = 16000; int bits = 2; edit(42, &value, 1, 1, &bits);
+                return SendDlgItemMessageW(window, IDC_MIC_METER, PBM_GETPOS, 0, 0) > 0;
+            }), "restoring resumes metering without restarting audio");
             click(window, IDC_MIC_MUTE); click(window, IDC_APPLY);
             check(wait([&] { return SendDlgItemMessageW(window, IDC_MIC_METER, PBM_GETPOS, 0, 0) == 0; }), "independent mute clears microphone meter immediately");
             click(window, IDC_MIC_MUTE);
@@ -194,7 +220,8 @@ int main(int argc, char** argv) {
             pcm = 10000; flags = 2; edit(99, &pcm, 1, 1, &flags);
             check(pcm == 10000 && flags == 2, "other server never receives mixing");
             SendMessageW(window, WM_CLOSE, 0, 0);
-            check(!IsWindowVisible(window) && active(), "closing GUI keeps sharing active");
+            check(!IsWindowVisible(window) && active() && SendDlgItemMessageW(window, IDC_MIC_METER, PBM_GETPOS, 0, 0) == 0,
+                "closing GUI suspends meters while keeping sharing active");
             configure(nullptr, nullptr); check(wait([&] { return IsWindowVisible(window); }), "reopening reuses settings GUI");
             click(window, IDC_MIC_MUTE); click(window, IDC_APPLY);
             pcm = 10000; flags = 2; edit(42, &pcm, 1, 1, &flags);
@@ -242,6 +269,7 @@ int main(int argc, char** argv) {
         shutdown(); check(!IsWindow(window), "shutdown joins GUI and destroys window");
         check(init() == 0, "reload after GUI shutdown"); configure(nullptr, nullptr);
         check(wait([] { return dialog() && IsWindowVisible(dialog()); }), "GUI opens after plugin reload");
+        check(IsDlgButtonChecked(dialog(), IDC_SHOW_METERS) == BST_CHECKED, "display preference survives plugin reload");
         check(SendDlgItemMessageW(dialog(), IDC_MIC_SLIDER, TBM_GETPOS, 0, 0) == GetPrivateProfileIntW(L"SoundBridge", L"MicrophonePercent", 0, file.c_str()), "saved settings restored by plugin reload");
         pcm = 10000; flags = 2; edit(42, &pcm, 1, 1, &flags);
         check(pcm == 10000 && flags == 2, "reloaded plugin does not auto-start sharing");

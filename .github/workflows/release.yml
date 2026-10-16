@@ -33,5 +33,5 @@ jobs:
           $version = $env:GITHUB_REF_NAME.Substring(1)
           gh release view $env:GITHUB_REF_NAME *> $null
           if ($LASTEXITCODE -eq 0) { throw 'Release already exists; never replace published installers.' }
-          gh release create $env:GITHUB_REF_NAME "dist/TS3-SoundBridge-$version-win64.ts3_plugin" dist/SHA256SUMS.txt assets/icon.svg assets/icon-256.png assets/soundbridge.ico --verify-tag --title "TS3 SoundBridge $version" --notes-file "docs/releases/$version.md" --latest
+          gh release create $env:GITHUB_REF_NAME "dist/TS3-SoundBridge-$version-win64.ts3_plugin" dist/SHA256SUMS.txt --verify-tag --title "TS3 SoundBridge $version" --notes-file "docs/releases/$version.md" --latest
           if ($LASTEXITCODE -ne 0) { throw 'Release publishing failed.' }

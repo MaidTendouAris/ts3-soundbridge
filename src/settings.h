@@ -11,6 +11,7 @@ struct Settings {
     int desktopPercent = 50;
     int microphonePercent = 100;
     bool microphoneMuted = false;
+    bool showLevelMeters = false;
     bool autoCheckUpdates = true;
     std::vector<std::wstring> applications;
 };

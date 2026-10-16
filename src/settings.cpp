@@ -18,6 +18,7 @@ Settings loadSettings(const std::wstring& file) {
     settings.desktopPercent = readGain(L"DesktopPercent", 50);
     settings.microphonePercent = readGain(L"MicrophonePercent", 100);
     settings.microphoneMuted = GetPrivateProfileIntW(L"SoundBridge", L"MicrophoneMuted", 0, file.c_str()) == 1;
+    settings.showLevelMeters = GetPrivateProfileIntW(L"SoundBridge", L"ShowLevelMeters", 0, file.c_str()) == 1;
     settings.autoCheckUpdates = GetPrivateProfileIntW(L"SoundBridge", L"AutoCheckUpdates", 1, file.c_str()) != 0;
     const UINT count = std::min(GetPrivateProfileIntW(L"Applications", L"Count", 0, file.c_str()), 64u);
     std::vector<wchar_t> path(32768);
@@ -48,6 +49,7 @@ bool saveSettings(const std::wstring& file, const Settings& settings) {
     write(L"SoundBridge", L"DesktopPercent", std::to_wstring(std::clamp(settings.desktopPercent, 0, MaximumGainPercent)));
     write(L"SoundBridge", L"MicrophonePercent", std::to_wstring(std::clamp(settings.microphonePercent, 0, MaximumGainPercent)));
     write(L"SoundBridge", L"MicrophoneMuted", settings.microphoneMuted ? L"1" : L"0");
+    write(L"SoundBridge", L"ShowLevelMeters", settings.showLevelMeters ? L"1" : L"0");
     write(L"SoundBridge", L"AutoCheckUpdates", settings.autoCheckUpdates ? L"1" : L"0");
     if (!WritePrivateProfileStringW(L"Applications", nullptr, nullptr, file.c_str())) success = false;
     write(L"Applications", L"Count", std::to_wstring(std::min<std::size_t>(settings.applications.size(), 64)));

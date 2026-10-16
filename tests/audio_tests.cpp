@@ -115,6 +115,10 @@ int main() {
         buffer.push({0.5f, 0.5f}); second.push({-0.5f, -0.5f}); flags = 2;
         const auto cancelled = mixSources(sources, 2, &mono, 1, 1, flags, 3, 0, false);
         check(cancelled.peaks.desktop == 0, "shared meter measures sum of applications rather than loudest application");
+        buffer.push({0.25f, 0.25f}); mono = 4096; flags = 2;
+        const auto unmeasured = mix(buffer, &mono, 1, 1, flags, 1, 1, false, false);
+        check(mono == 12288 && flags == 3 && unmeasured.peaks.desktop == 0 && unmeasured.peaks.microphone == 0,
+            "disabled metering skips peak measurement without changing actual audio");
     }
     {
         PeakAccumulator accumulator;
@@ -127,12 +131,26 @@ int main() {
             "meters share logarithmic scale and saturate display at full scale");
         check(std::abs(peakDb(3) - 9.542425f) < 0.0001f, "overload readout preserves positive dBFS");
         MeterEnvelope envelope;
-        check(envelope.update(1, 0) == 1, "meter attacks immediately");
-        check(std::abs(envelope.update(0, 0.5f) - 0.2511886f) < 0.0001f, "meter decays at 24 dB per second when audio callbacks stop");
+        const auto first = envelope.update(1, 0.033f), second = envelope.update(1, 0.033f);
+        check(first > 0 && first < second && second < 1, "attack rises smoothly rather than jumping to each incoming peak");
+        for (int i = 0; i < 50; ++i) envelope.update(1, 0.033f);
+        check(envelope.update(1, 0.033f) > 0.999f, "steady signal settles to its post-gain peak");
+        check(envelope.update(0, 0.033f) > 0.999f, "brief hold bridges adjacent refresh intervals");
+        const auto falling = envelope.update(0, 0.3f);
+        check(falling > 0.1f && falling < 0.9f, "release smoothly decays instead of snapping to silence");
         check(envelope.update(0, 5) == 0, "meter eventually returns to silence");
-        envelope.update(1, 0); envelope.reset();
+        envelope.update(2, 0.033f);
+        check(envelope.overloaded(), "raw transient overload remains visible despite smoothed amplitude");
+        envelope.update(0, 0.3f); check(envelope.overloaded(), "overload indicator holds briefly");
+        envelope.update(0, 0.6f); check(!envelope.overloaded(), "overload indicator expires");
+        envelope.reset();
         check(envelope.update(0, 0) == 0, "stopping resets display without a stale tail");
-        check(envelope.update(0.0001f, 0) == 0.0001f, "quiet nonzero input retains an honest numeric readout below the bar scale");
+        const auto quiet = envelope.update(0.0001f, 0.033f);
+        check(quiet > 0 && quiet < 0.0001f, "quiet nonzero input is not discarded below the bar scale");
+        MeterEnvelope coarse, fine;
+        const auto coarseValue = coarse.update(1, 0.1f);
+        float fineValue = 0; for (int i = 0; i < 10; ++i) fineValue = fine.update(1, 0.01f);
+        check(std::abs(coarseValue - fineValue) < 0.00001f, "smoothing is based on elapsed time rather than refresh count");
     }
     if (failures) return 1;
     std::cout << "All audio core tests passed.\n"; return 0;

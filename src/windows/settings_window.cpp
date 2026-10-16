@@ -55,7 +55,7 @@ void SettingsWindow::run() {
     if (!dialog) return;
     window_.store(dialog);
     if (closing_.load()) DestroyWindow(dialog);
-    else if (showRequested_.exchange(false)) { ShowWindow(dialog, SW_SHOW); SetForegroundWindow(dialog); }
+    else if (showRequested_.exchange(false)) { ShowWindow(dialog, SW_SHOW); refreshMetering(); SetForegroundWindow(dialog); }
     MSG message{};
     while (GetMessageW(&message, nullptr, 0, 0) > 0) {
         if (!IsDialogMessageW(dialog, &message)) { TranslateMessage(&message); DispatchMessageW(&message); }
@@ -112,23 +112,26 @@ INT_PTR SettingsWindow::handle(HWND dialog, UINT message, WPARAM wparam, LPARAM)
         }
         fitToScreen(); fill(engine_.settings());
         SetTimer(dialog, 1, 500, nullptr);
-        SetTimer(dialog, 2, 50, nullptr);
         return TRUE;
     }
     case WM_SB_SHOW:
         showRequested_.store(false); fill(engine_.settings());
-        ShowWindow(dialog, SW_RESTORE); SetForegroundWindow(dialog); return TRUE;
+        ShowWindow(dialog, SW_RESTORE); refreshMetering(); SetForegroundWindow(dialog); return TRUE;
     case WM_SB_SHUTDOWN: DestroyWindow(dialog); return TRUE;
-    case WM_CLOSE: ShowWindow(dialog, SW_HIDE); return TRUE;
-    case WM_DESTROY: KillTimer(dialog, 1); KillTimer(dialog, 2); PostQuitMessage(0); return TRUE;
+    case WM_CLOSE: stopMetering(); ShowWindow(dialog, SW_HIDE); return TRUE;
+    case WM_SIZE:
+        if (wparam == SIZE_MINIMIZED) stopMetering(); else refreshMetering();
+        return FALSE;
+    case WM_DESTROY: stopMetering(); KillTimer(dialog, 1); PostQuitMessage(0); return TRUE;
     case WM_TIMER:
-        if (wparam == 2) updateLevels();
+        if (wparam == 2 && meterTimerRunning_) updateLevels();
         else if (wparam == 1) { updateStatus(); updateUpdateStatus(); }
         return TRUE;
     case WM_HSCROLL: updateLabels(); return TRUE;
     case WM_COMMAND:
         switch (LOWORD(wparam)) {
-        case IDCANCEL: ShowWindow(dialog, SW_HIDE); return TRUE;
+        case IDCANCEL: stopMetering(); ShowWindow(dialog, SW_HIDE); return TRUE;
+        case IDC_SHOW_METERS: toggleMeters(); return TRUE;
         case IDC_MODE_ALL: case IDC_MODE_SELECTED: updateMode(); return TRUE;
         case IDC_REFRESH: refreshApplications(draft().applications); return TRUE;
         case IDC_CLEAR: {
@@ -155,14 +158,15 @@ INT_PTR SettingsWindow::handle(HWND dialog, UINT message, WPARAM wparam, LPARAM)
 }
 void SettingsWindow::fill(const Settings& settings) {
     const auto window = window_.load();
-    engine_.takeLevels(); desktopMeter_.reset(); microphoneMeter_.reset(); meterTick_ = GetTickCount64();
+    stopMetering(); engine_.takeLevels();
     notice_.clear(); noticeUntil_ = 0;
     CheckRadioButton(window, IDC_MODE_ALL, IDC_MODE_SELECTED, settings.mode == CaptureMode::SelectedApplications ? IDC_MODE_SELECTED : IDC_MODE_ALL);
     SendDlgItemMessageW(window, IDC_DESKTOP_SLIDER, TBM_SETPOS, TRUE, settings.desktopPercent);
     SendDlgItemMessageW(window, IDC_MIC_SLIDER, TBM_SETPOS, TRUE, settings.microphonePercent);
     CheckDlgButton(window, IDC_MIC_MUTE, settings.microphoneMuted ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(window, IDC_SHOW_METERS, settings.showLevelMeters ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(window, IDC_AUTO_UPDATE, settings.autoCheckUpdates ? BST_CHECKED : BST_UNCHECKED);
-    refreshApplications(settings.applications); updateLabels(); updateMode(); updateStatus(); updateUpdateStatus(); updateLevels();
+    refreshApplications(settings.applications); updateLabels(); updateMode(); updateStatus(); updateUpdateStatus();
 }
 Settings SettingsWindow::draft() const {
     const auto window = window_.load();
@@ -171,6 +175,7 @@ Settings SettingsWindow::draft() const {
     settings.desktopPercent = static_cast<int>(SendDlgItemMessageW(window, IDC_DESKTOP_SLIDER, TBM_GETPOS, 0, 0));
     settings.microphonePercent = static_cast<int>(SendDlgItemMessageW(window, IDC_MIC_SLIDER, TBM_GETPOS, 0, 0));
     settings.microphoneMuted = IsDlgButtonChecked(window, IDC_MIC_MUTE) == BST_CHECKED;
+    settings.showLevelMeters = IsDlgButtonChecked(window, IDC_SHOW_METERS) == BST_CHECKED;
     settings.autoCheckUpdates = IsDlgButtonChecked(window, IDC_AUTO_UPDATE) == BST_CHECKED;
     const auto list = GetDlgItem(window, IDC_APPS);
     for (int i = 0; i < ListView_GetItemCount(list) && i < static_cast<int>(applications_.size()); ++i)
@@ -225,8 +230,52 @@ void SettingsWindow::updateLabels() {
     const auto microphone = std::to_wstring(SendDlgItemMessageW(window, IDC_MIC_SLIDER, TBM_GETPOS, 0, 0)) + L"%";
     SetDlgItemTextW(window, IDC_DESKTOP_VALUE, desktop.c_str()); SetDlgItemTextW(window, IDC_MIC_VALUE, microphone.c_str());
 }
+void SettingsWindow::stopMetering() {
+    const auto window = window_.load();
+    KillTimer(window, 2); meterTimerRunning_ = false;
+    engine_.setMeteringVisible(false);
+    desktopMeter_.reset(); microphoneMeter_.reset();
+    meterTick_ = GetTickCount64(); levelLabelTick_ = 0;
+    for (int id : {IDC_DESKTOP_METER, IDC_MIC_METER}) SendDlgItemMessageW(window, id, PBM_SETPOS, 0, 0);
+    for (int id : {IDC_DESKTOP_LEVEL, IDC_MIC_LEVEL}) SetDlgItemTextW(window, id, L"−∞ dBFS");
+}
+void SettingsWindow::refreshMetering() {
+    const auto window = window_.load();
+    const bool show = IsDlgButtonChecked(window, IDC_SHOW_METERS) == BST_CHECKED;
+    for (int id : {IDC_DESKTOP_METER, IDC_MIC_METER, IDC_DESKTOP_LEVEL, IDC_MIC_LEVEL})
+        ShowWindow(GetDlgItem(window, id), show ? SW_SHOW : SW_HIDE);
+    const wchar_t* hint = show ? L"-60 → 0 dBFS · 红色：近期过载" : L"电平已关闭，可按需开启。";
+    wchar_t previous[64]{}; GetDlgItemTextW(window, IDC_METER_HINT, previous, 64);
+    if (std::wstring(previous) != hint) SetDlgItemTextW(window, IDC_METER_HINT, hint);
+    const bool run = show && IsWindowVisible(window) && !IsIconic(window) && engine_.requestedServer() != 0;
+    if (run == meterTimerRunning_) return;
+    if (!run) { stopMetering(); return; }
+    stopMetering();
+    engine_.setMeteringVisible(true);
+    meterTimerRunning_ = SetTimer(window, 2, 33, nullptr) != 0;
+    if (!meterTimerRunning_) {
+        engine_.setMeteringVisible(false);
+        SetDlgItemTextW(window, IDC_METER_HINT, L"电平刷新启动失败，请重新打开设置。" );
+    }
+}
+void SettingsWindow::toggleMeters() {
+    const auto window = window_.load();
+    auto settings = engine_.settings();
+    const bool previous = settings.showLevelMeters;
+    settings.showLevelMeters = IsDlgButtonChecked(window, IDC_SHOW_METERS) == BST_CHECKED;
+    // The display toggle takes effect immediately, without applying unrelated
+    // gain/application drafts currently being edited in the dialog.
+    if (saveSettings(settingsFile_, settings)) engine_.apply(std::move(settings));
+    else {
+        CheckDlgButton(window, IDC_SHOW_METERS, previous ? BST_CHECKED : BST_UNCHECKED);
+        notice_ = L"无法保存电平显示设置，请检查配置目录权限。"; noticeUntil_ = 0;
+    }
+    updateStatus();
+}
 void SettingsWindow::updateLevels() {
     const auto window = window_.load();
+    if (!meterTimerRunning_) return;
+    if (!engine_.requestedServer() || !IsWindowVisible(window) || IsIconic(window)) { stopMetering(); return; }
     const auto reading = engine_.takeLevels();
     const auto now = GetTickCount64();
     const float elapsed = static_cast<float>(now - meterTick_) / 1000.0f; meterTick_ = now;
@@ -236,23 +285,27 @@ void SettingsWindow::updateLevels() {
     if (reading.microphoneMuted) microphoneMeter_.reset();
     const auto desktop = desktopMeter_.update(reading.peaks.desktop, elapsed);
     const auto microphone = microphoneMeter_.update(reading.peaks.microphone, elapsed);
-    const auto draw = [&](int meter, int label, float peak) {
+    const bool updateReadouts = now - levelLabelTick_ >= 100;
+    if (updateReadouts) levelLabelTick_ = now;
+    const auto draw = [&](int meter, int label, float peak, bool overloaded) {
         const float db = peakDb(peak);
-        const auto color = db >= 0 ? RGB(210, 67, 67) : db >= -12 ? RGB(196, 140, 32) : RGB(41, 151, 97);
+        const auto color = overloaded ? RGB(210, 67, 67) : db >= -12 ? RGB(196, 140, 32) : RGB(41, 151, 97);
         SendDlgItemMessageW(window, meter, PBM_SETBARCOLOR, 0, color);
         SendDlgItemMessageW(window, meter, PBM_SETPOS, meterPosition(peak), 0);
+        if (!updateReadouts) return;
         std::wstring text = L"−∞ dBFS";
         if (peak > 0) {
             std::wostringstream value;
-            if (db > 0) value << L'+';
-            value << std::fixed << std::setprecision(1) << db << L" dBFS";
+            const float rounded = std::round(db * 10) / 10;
+            if (rounded > 0) value << L'+';
+            value << std::fixed << std::setprecision(1) << (rounded == 0 ? 0.0f : rounded) << L" dBFS";
             text = value.str();
         }
         wchar_t previous[64]{}; GetDlgItemTextW(window, label, previous, 64);
         if (text != previous) SetDlgItemTextW(window, label, text.c_str());
     };
-    draw(IDC_DESKTOP_METER, IDC_DESKTOP_LEVEL, desktop);
-    draw(IDC_MIC_METER, IDC_MIC_LEVEL, microphone);
+    draw(IDC_DESKTOP_METER, IDC_DESKTOP_LEVEL, desktop, desktopMeter_.overloaded());
+    draw(IDC_MIC_METER, IDC_MIC_LEVEL, microphone, microphoneMeter_.overloaded());
 }
 void SettingsWindow::updateStatus() {
     const auto window = window_.load();
@@ -269,6 +322,7 @@ void SettingsWindow::updateStatus() {
         text = details.str();
     }
     SetDlgItemTextW(window, IDC_STATUS, text.c_str());
+    refreshMetering();
 }
 void SettingsWindow::updateUpdateStatus() {
     const auto result = updates_.status(); const auto window = window_.load();

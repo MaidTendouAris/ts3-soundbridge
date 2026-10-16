@@ -16,7 +16,7 @@ struct MixResult {
 
 template<std::size_t Capacity>
 MixResult mixSources(AudioBuffer<Capacity>* const* buffers, std::size_t sourceCount, short* samples, int frames, int channels,
-              int& flags, float desktopGain, float microphoneGain, bool microphoneMuted) noexcept {
+              int& flags, float desktopGain, float microphoneGain, bool microphoneMuted, bool measureLevels = true) noexcept {
     MixResult result;
     if (!samples || frames <= 0 || (channels != 1 && channels != 2)) return result;
     // TS3's ORIGINAL send bit gates the microphone before desktop audio changes it.
@@ -44,8 +44,10 @@ MixResult mixSources(AudioBuffer<Capacity>* const* buffers, std::size_t sourceCo
             const auto index = i * channels + channel;
             const float microphone = microphoneAllowed ? samples[index] / 32768.0f * microphoneGain : 0;
             const float system = channels == 1 ? (left + right) * 0.5f : (channel == 0 ? left : right);
-            result.peaks.microphone = std::max(result.peaks.microphone, std::abs(microphone));
-            result.peaks.desktop = std::max(result.peaks.desktop, std::abs(system));
+            if (measureLevels) {
+                result.peaks.microphone = std::max(result.peaks.microphone, std::abs(microphone));
+                result.peaks.desktop = std::max(result.peaks.desktop, std::abs(system));
+            }
             samples[index] = toPcm16(microphone + system);
         }
     }
@@ -56,8 +58,8 @@ MixResult mixSources(AudioBuffer<Capacity>* const* buffers, std::size_t sourceCo
 }
 template<std::size_t Capacity>
 MixResult mix(AudioBuffer<Capacity>& buffer, short* samples, int frames, int channels,
-              int& flags, float desktopGain, float microphoneGain, bool microphoneMuted) noexcept {
+              int& flags, float desktopGain, float microphoneGain, bool microphoneMuted, bool measureLevels = true) noexcept {
     AudioBuffer<Capacity>* sources[] = { &buffer };
-    return mixSources(sources, 1, samples, frames, channels, flags, desktopGain, microphoneGain, microphoneMuted);
+    return mixSources(sources, 1, samples, frames, channels, flags, desktopGain, microphoneGain, microphoneMuted, measureLevels);
 }
 }

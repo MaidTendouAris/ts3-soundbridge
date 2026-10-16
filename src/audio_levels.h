@@ -38,12 +38,21 @@ class MeterEnvelope {
 public:
     float update(float peak, float elapsedSeconds) noexcept {
         if (!std::isfinite(peak) || peak < 0) peak = 0;
-        value_ = std::max(peak, value_ * std::pow(10.0f, -24.0f * std::clamp(elapsedSeconds, 0.0f, 5.0f) / 20.0f));
-        if (peak == 0 && value_ < 0.001f) value_ = 0;
+        const float elapsed = std::clamp(elapsedSeconds, 0.0f, 5.0f);
+        if (peak >= target_) { target_ = peak; hold_ = 0.10f; }
+        else { hold_ = std::max(0.0f, hold_ - elapsed); if (hold_ == 0) target_ = peak; }
+        overloadHold_ = peak >= 1 ? 0.8f : std::max(0.0f, overloadHold_ - elapsed);
+        // Time-based attack/release smoothing is independent of timer jitter.
+        // A brief peak hold bridges adjacent GUI intervals; overload indication
+        // follows raw peaks so smoothing cannot conceal a clipped transient.
+        const float tau = target_ > value_ ? 0.08f : 0.35f;
+        value_ += (target_ - value_) * -std::expm1(-elapsed / tau);
+        if (target_ == 0 && value_ < 0.001f) value_ = 0;
         return value_;
     }
-    void reset() noexcept { value_ = 0; }
+    bool overloaded() const noexcept { return overloadHold_ > 0; }
+    void reset() noexcept { value_ = target_ = hold_ = overloadHold_ = 0; }
 private:
-    float value_ = 0;
+    float value_ = 0, target_ = 0, hold_ = 0, overloadHold_ = 0;
 };
 }

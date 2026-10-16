@@ -33,6 +33,7 @@ void BridgeEngine::apply(Settings settings) {
         desktopGain_.store(settings_.desktopPercent / 100.0f);
         microphoneGain_.store(settings_.microphonePercent / 100.0f);
         micMuted_.store(settings_.microphoneMuted);
+        metersEnabled_.store(settings_.showLevelMeters);
     }
     if (routesChanged) {
         activeServer_.store(0); revision_.fetch_add(1); wake_.notify_all();
@@ -44,11 +45,15 @@ BridgeEngine::Levels BridgeEngine::takeLevels() noexcept {
     Levels result;
     result.peaks = peaks_.take();
     const auto server = requestedServer_.load();
-    result.active = server && activeServer_.load() == server && activeRevision_.load() == revision_.load();
+    result.active = server && activeServer_.load() == server && activeRevision_.load() == revision_.load() &&
+        metersEnabled_.load() && meterConsumer_.load();
     result.microphoneMuted = micMuted_.load();
     if (!result.active) result.peaks = {};
     if (result.microphoneMuted) result.peaks.microphone = 0;
     return result;
+}
+void BridgeEngine::setMeteringVisible(bool visible) noexcept {
+    meterConsumer_.store(visible); peaks_.reset();
 }
 void BridgeEngine::start(std::uint64_t server) {
     activeServer_.store(0); requestedServer_.store(server);
@@ -199,9 +204,10 @@ void BridgeEngine::edit(std::uint64_t server, short* samples, int frames, int ch
     if (!lock.owns_lock() || requestedServer_.load() != server || activeRevision_.load() != revision_.load() || activeServer_.load() != server) return;
     AudioBuffer<>* buffers[16]; std::size_t count = 0;
     for (const auto& source : sources_) if (source->capture.running() && count < 16) buffers[count++] = &source->buffer;
+    const bool measureLevels = metersEnabled_.load(std::memory_order_relaxed) && meterConsumer_.load(std::memory_order_relaxed);
     const auto result = mixSources(buffers, count, samples, frames, channels, *flags,
-        desktopGain_.load(), microphoneGain_.load(), micMuted_.load());
-    peaks_.publish(result.peaks);
+        desktopGain_.load(), microphoneGain_.load(), micMuted_.load(), measureLevels);
+    if (measureLevels) peaks_.publish(result.peaks);
     callbacks_.fetch_add(1, std::memory_order_relaxed); mixedFrames_.fetch_add(result.desktopFrames, std::memory_order_relaxed);
     underruns_.fetch_add(result.underrunFrames, std::memory_order_relaxed);
 }

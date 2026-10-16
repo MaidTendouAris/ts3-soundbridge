@@ -24,6 +24,9 @@ private:
     void updateMode();
     void updateLabels();
     void updateLevels();
+    void refreshMetering();
+    void stopMetering();
+    void toggleMeters();
     void updateStatus();
     void updateUpdateStatus();
     void fitToScreen();
@@ -39,6 +42,8 @@ private:
     HFONT font_ = nullptr, headerFont_ = nullptr;
     ULONGLONG noticeUntil_ = 0;
     ULONGLONG meterTick_ = 0;
+    ULONGLONG levelLabelTick_ = 0;
     MeterEnvelope desktopMeter_, microphoneMeter_;
+    bool meterTimerRunning_ = false;
 };
 }

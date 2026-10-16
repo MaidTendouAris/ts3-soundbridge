@@ -31,12 +31,14 @@ int main() {
     const auto file = (std::filesystem::current_path() / L"selection-test-settings.ini").wstring();
     DeleteFileW(file.c_str());
     Settings settings; settings.mode = CaptureMode::SelectedApplications; settings.desktopPercent = 73;
+    check(!loadSettings(file).showLevelMeters, "missing display preference defaults to meters off");
+    settings.showLevelMeters = true;
     settings.microphonePercent = 42; settings.microphoneMuted = true;
     settings.applications = {L"D:\\音乐 播放器\\播放器.exe", L"C:\\Second.exe"};
     check(saveSettings(file, settings), "save Unicode settings");
     const auto loaded = loadSettings(file);
     check(loaded.mode == settings.mode && loaded.desktopPercent == 73 && loaded.microphonePercent == 42 &&
-        loaded.microphoneMuted && loaded.applications == settings.applications, "Unicode configuration round trip");
+        loaded.microphoneMuted && loaded.showLevelMeters && loaded.applications == settings.applications, "Unicode configuration and display preference round trip");
     settings.desktopPercent = 300; settings.microphonePercent = 275;
     check(saveSettings(file, settings), "save expanded gains");
     check(loadSettings(file).desktopPercent == 300 && loadSettings(file).microphonePercent == 275, "expanded gain range survives persistence");

@@ -50,7 +50,8 @@ BEGIN
     LTEXT "播放声音后刷新列表。\n重启应用会自动关联。", -1, 24, 213, 130, 25
     PUSHBUTTON "清除选择", IDC_CLEAR, 161, 216, 56, 18
     PUSHBUTTON "刷新应用", IDC_REFRESH, 224, 216, 60, 18
-    GROUPBOX "音量与电平（增益后）", -1, 304, 32, 224, 155
+    GROUPBOX "音量（增益后）", -1, 304, 32, 224, 155
+    CONTROL "显示实时电平", IDC_SHOW_METERS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 418, 31, 102, 14
     LTEXT "共享声音", -1, 316, 49, 90, 14
     LTEXT "50%", IDC_DESKTOP_VALUE, 476, 49, 40, 14
     CONTROL "", IDC_DESKTOP_SLIDER, "msctls_trackbar32", TBS_HORZ | TBS_NOTICKS | WS_TABSTOP, 312, 66, 208, 20
@@ -61,7 +62,7 @@ BEGIN
     CONTROL "", IDC_MIC_SLIDER, "msctls_trackbar32", TBS_HORZ | TBS_NOTICKS | WS_TABSTOP, 312, 127, 208, 20
     CONTROL "", IDC_MIC_METER, "msctls_progress32", PBS_SMOOTH, 316, 153, 144, 8
     LTEXT "−∞ dBFS", IDC_MIC_LEVEL, 466, 149, 50, 14
-    LTEXT "共享时显示 · -60 → 0 dBFS · 红色：过载", -1, 316, 169, 200, 12
+    LTEXT "电平已关闭，可按需开启。", IDC_METER_HINT, 316, 169, 200, 12
     CONTROL "麦克风独立静音（共享声音继续发送）", IDC_MIC_MUTE, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 308, 195, 220, 15
     LTEXT "运行状态", -1, 12, 249, 110, 12
     CONTROL "显示运行详情", IDC_DETAILS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 185, 247, 111, 15
