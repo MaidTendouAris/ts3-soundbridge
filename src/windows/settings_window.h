@@ -23,6 +23,9 @@ private:
     void refreshApplications(const std::vector<std::wstring>& selected);
     void updateMode();
     void updateLabels();
+    void applyLiveGains(bool saveNow);
+    void saveLiveGains();
+    void updatePendingState();
     void updateLevels();
     void refreshMetering();
     void stopMetering();
@@ -45,5 +48,8 @@ private:
     ULONGLONG levelLabelTick_ = 0;
     MeterEnvelope desktopMeter_, microphoneMeter_;
     bool meterTimerRunning_ = false;
+    bool updatingControls_ = false, pendingSettings_ = false;
+    bool gainsSavePending_ = false, gainsSaveFailed_ = false, headerWarning_ = false;
+    Settings appliedSettings_;
 };
 }

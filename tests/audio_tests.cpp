@@ -94,6 +94,13 @@ int main() {
         check(pcm[0] == 2000 && pcm[1] == 2000, "sum sources before saturation");
     }
     check(toPcm16(std::numeric_limits<float>::quiet_NaN()) == 0, "invalid sample becomes silence");
+    for (const float gain : {0.0f, 0.5f, 1.0f, 2.0f, 3.0f}) {
+        AudioBuffer<8> buffer; buffer.push({0.125f, -0.125f});
+        short pcm[] = {0, 0}; int flags = 0;
+        const auto result = mix(buffer, pcm, 1, 2, flags, gain, 0, false);
+        check(pcm[0] == static_cast<short>(4096 * gain) && pcm[1] == static_cast<short>(-4096 * gain) &&
+            result.peaks.desktop == 0.125f * gain, "shared post-gain level agrees with actual PCM across 0 to 300 percent");
+    }
     {
         AudioBuffer<8> buffer;
         buffer.push({0.5f, -0.25f}); short pcm[] = {-16384, 8192}; int flags = 2;
@@ -151,6 +158,12 @@ int main() {
         const auto coarseValue = coarse.update(1, 0.1f);
         float fineValue = 0; for (int i = 0; i < 10; ++i) fineValue = fine.update(1, 0.01f);
         check(std::abs(coarseValue - fineValue) < 0.00001f, "smoothing is based on elapsed time rather than refresh count");
+        MeterEnvelope gainChange;
+        for (int i = 0; i < 50; ++i) gainChange.update(0.25f, 0.033f);
+        gainChange.rescale(2);
+        check(std::abs(gainChange.update(0.5f, 0) - 0.5f) < 0.0001f, "gain changes rescale the envelope immediately without replaying old gain");
+        gainChange.rescale(0);
+        check(gainChange.update(0, 0) == 0 && !gainChange.overloaded(), "zero gain immediately clears held level and overload");
     }
     if (failures) return 1;
     std::cout << "All audio core tests passed.\n"; return 0;

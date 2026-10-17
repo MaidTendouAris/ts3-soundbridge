@@ -11,6 +11,11 @@
 namespace soundbridge {
 namespace {
 void windowModuleAddress() {}
+constexpr auto GainSaveError = L"音量已实时生效，但无法保存。请检查配置目录权限后重试。";
+void setControlText(HWND window, int id, const wchar_t* text) {
+    wchar_t previous[256]{}; GetDlgItemTextW(window, id, previous, 256);
+    if (std::wstring(previous) != text) SetDlgItemTextW(window, id, text);
+}
 struct ThemeScope {
     HANDLE context = INVALID_HANDLE_VALUE;
     ULONG_PTR cookie = 0;
@@ -75,7 +80,7 @@ INT_PTR CALLBACK SettingsWindow::procedure(HWND dialog, UINT message, WPARAM wpa
     try { return self->handle(dialog, message, wparam, lparam); }
     catch (...) { SetDlgItemTextW(dialog, IDC_STATUS, L"设置操作失败，请关闭窗口后重试。"); return TRUE; }
 }
-INT_PTR SettingsWindow::handle(HWND dialog, UINT message, WPARAM wparam, LPARAM) {
+INT_PTR SettingsWindow::handle(HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
     case WM_INITDIALOG: {
         SetDlgItemTextW(dialog, IDC_UPDATE_GROUP, L"版本 " SOUNDBRIDGE_VERSION_WSTRING L" · 更新");
@@ -115,28 +120,51 @@ INT_PTR SettingsWindow::handle(HWND dialog, UINT message, WPARAM wparam, LPARAM)
         return TRUE;
     }
     case WM_SB_SHOW:
-        showRequested_.store(false); fill(engine_.settings());
+        showRequested_.store(false);
+        if (!pendingSettings_) fill(engine_.settings()); else updateStatus();
         ShowWindow(dialog, SW_RESTORE); refreshMetering(); SetForegroundWindow(dialog); return TRUE;
     case WM_SB_SHUTDOWN: DestroyWindow(dialog); return TRUE;
-    case WM_CLOSE: stopMetering(); ShowWindow(dialog, SW_HIDE); return TRUE;
+    case WM_CLOSE: saveLiveGains(); stopMetering(); ShowWindow(dialog, SW_HIDE); return TRUE;
     case WM_SIZE:
         if (wparam == SIZE_MINIMIZED) stopMetering(); else refreshMetering();
         return FALSE;
-    case WM_DESTROY: stopMetering(); KillTimer(dialog, 1); PostQuitMessage(0); return TRUE;
+    case WM_DESTROY: saveLiveGains(); stopMetering(); KillTimer(dialog, 1); KillTimer(dialog, 3); PostQuitMessage(0); return TRUE;
     case WM_TIMER:
         if (wparam == 2 && meterTimerRunning_) updateLevels();
         else if (wparam == 1) { updateStatus(); updateUpdateStatus(); }
+        else if (wparam == 3) saveLiveGains();
         return TRUE;
-    case WM_HSCROLL: updateLabels(); return TRUE;
+    case WM_HSCROLL:
+        updateLabels(); applyLiveGains(LOWORD(wparam) == TB_ENDTRACK); return TRUE;
+    case WM_NOTIFY:
+        if (lparam) {
+            const auto* notification = reinterpret_cast<NMHDR*>(lparam);
+            if (notification->idFrom == IDC_APPS && notification->code == LVN_ITEMCHANGED) {
+                const auto* change = reinterpret_cast<NMLISTVIEW*>(lparam);
+                if ((change->uChanged & LVIF_STATE) && ((change->uOldState ^ change->uNewState) & LVIS_STATEIMAGEMASK)) updatePendingState();
+            }
+        }
+        return FALSE;
+    case WM_CTLCOLORSTATIC:
+        if (reinterpret_cast<HWND>(lparam) == GetDlgItem(dialog, IDC_SETTINGS_HINT)) {
+            const auto dc = reinterpret_cast<HDC>(wparam);
+            SetTextColor(dc, pendingSettings_ || gainsSaveFailed_ ? RGB(156, 83, 0) : gainsSavePending_ ? RGB(33, 91, 164) : GetSysColor(COLOR_WINDOWTEXT));
+            SetBkColor(dc, GetSysColor(COLOR_BTNFACE));
+            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_BTNFACE));
+        }
+        return FALSE;
     case WM_COMMAND:
         switch (LOWORD(wparam)) {
-        case IDCANCEL: stopMetering(); ShowWindow(dialog, SW_HIDE); return TRUE;
+        case IDCANCEL: saveLiveGains(); stopMetering(); ShowWindow(dialog, SW_HIDE); return TRUE;
         case IDC_SHOW_METERS: toggleMeters(); return TRUE;
-        case IDC_MODE_ALL: case IDC_MODE_SELECTED: updateMode(); return TRUE;
+        case IDC_MODE_ALL: case IDC_MODE_SELECTED: updateMode(); updatePendingState(); return TRUE;
+        case IDC_MIC_MUTE: case IDC_AUTO_UPDATE: updatePendingState(); return TRUE;
         case IDC_REFRESH: refreshApplications(draft().applications); return TRUE;
         case IDC_CLEAR: {
+            updatingControls_ = true;
             const auto list = GetDlgItem(dialog, IDC_APPS);
             for (int i = 0; i < ListView_GetItemCount(list); ++i) ListView_SetCheckState(list, i, FALSE);
+            updatingControls_ = false; updatePendingState();
             return TRUE;
         }
         case IDC_DETAILS: updateStatus(); return TRUE;
@@ -158,6 +186,7 @@ INT_PTR SettingsWindow::handle(HWND dialog, UINT message, WPARAM wparam, LPARAM)
 }
 void SettingsWindow::fill(const Settings& settings) {
     const auto window = window_.load();
+    updatingControls_ = true; appliedSettings_ = settings;
     stopMetering(); engine_.takeLevels();
     notice_.clear(); noticeUntil_ = 0;
     CheckRadioButton(window, IDC_MODE_ALL, IDC_MODE_SELECTED, settings.mode == CaptureMode::SelectedApplications ? IDC_MODE_SELECTED : IDC_MODE_ALL);
@@ -166,7 +195,8 @@ void SettingsWindow::fill(const Settings& settings) {
     CheckDlgButton(window, IDC_MIC_MUTE, settings.microphoneMuted ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(window, IDC_SHOW_METERS, settings.showLevelMeters ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(window, IDC_AUTO_UPDATE, settings.autoCheckUpdates ? BST_CHECKED : BST_UNCHECKED);
-    refreshApplications(settings.applications); updateLabels(); updateMode(); updateStatus(); updateUpdateStatus();
+    refreshApplications(settings.applications); updateLabels(); updateMode();
+    updatingControls_ = false; updateStatus(); updateUpdateStatus();
 }
 Settings SettingsWindow::draft() const {
     const auto window = window_.load();
@@ -194,9 +224,12 @@ bool SettingsWindow::apply() {
         notice_ = L"无法保存设置，请检查 TS3 配置目录的写入权限。"; noticeUntil_ = 0; updateStatus(); return false;
     }
     engine_.apply(settings); updates_.setAutomatic(settings.autoCheckUpdates);
+    KillTimer(window_.load(), 3); gainsSavePending_ = gainsSaveFailed_ = false;
+    appliedSettings_ = settings;
     notice_ = L"设置已应用并保存。"; noticeUntil_ = GetTickCount64() + 2000; updateStatus(); return true;
 }
 void SettingsWindow::refreshApplications(const std::vector<std::wstring>& selected) {
+    const bool wasUpdating = updatingControls_; updatingControls_ = true;
     auto applications = audioApplications(GetCurrentProcessId());
     // Preserve configured choices even when the application is not running or
     // has not yet created an audio session. Binding follows the executable path.
@@ -217,6 +250,7 @@ void SettingsWindow::refreshApplications(const std::vector<std::wstring>& select
         ListView_SetCheckState(list, row, std::any_of(selected.begin(), selected.end(), [&](const auto& path) { return samePath(path, app.path); }));
     }
     SendMessageW(list, WM_SETREDRAW, TRUE, 0); InvalidateRect(list, nullptr, TRUE);
+    updatingControls_ = wasUpdating; updatePendingState();
 }
 void SettingsWindow::updateMode() {
     const auto window = window_.load();
@@ -229,6 +263,68 @@ void SettingsWindow::updateLabels() {
     const auto desktop = std::to_wstring(SendDlgItemMessageW(window, IDC_DESKTOP_SLIDER, TBM_GETPOS, 0, 0)) + L"%";
     const auto microphone = std::to_wstring(SendDlgItemMessageW(window, IDC_MIC_SLIDER, TBM_GETPOS, 0, 0)) + L"%";
     SetDlgItemTextW(window, IDC_DESKTOP_VALUE, desktop.c_str()); SetDlgItemTextW(window, IDC_MIC_VALUE, microphone.c_str());
+}
+void SettingsWindow::applyLiveGains(bool saveNow) {
+    if (updatingControls_) return;
+    const auto window = window_.load();
+    auto settings = engine_.settings();
+    const int desktop = static_cast<int>(SendDlgItemMessageW(window, IDC_DESKTOP_SLIDER, TBM_GETPOS, 0, 0));
+    const int microphone = static_cast<int>(SendDlgItemMessageW(window, IDC_MIC_SLIDER, TBM_GETPOS, 0, 0));
+    if (settings.desktopPercent != desktop || settings.microphonePercent != microphone) {
+        if (settings.desktopPercent != desktop) desktopMeter_.rescale(settings.desktopPercent ? static_cast<float>(desktop) / settings.desktopPercent : 0);
+        if (settings.microphonePercent != microphone) microphoneMeter_.rescale(settings.microphonePercent ? static_cast<float>(microphone) / settings.microphonePercent : 0);
+        settings.desktopPercent = desktop; settings.microphonePercent = microphone;
+        engine_.apply(std::move(settings)); levelLabelTick_ = 0;
+        gainsSavePending_ = true; gainsSaveFailed_ = false;
+        if (!SetTimer(window, 3, 300, nullptr)) saveNow = true;
+    }
+    if (saveNow) saveLiveGains(); else updatePendingState();
+}
+void SettingsWindow::saveLiveGains() {
+    const auto window = window_.load(); KillTimer(window, 3);
+    if (!gainsSavePending_) return;
+    if (saveSettings(settingsFile_, engine_.settings())) {
+        gainsSavePending_ = gainsSaveFailed_ = false;
+        if (notice_ == GainSaveError) { notice_.clear(); noticeUntil_ = 0; }
+    }
+    else {
+        gainsSaveFailed_ = true;
+        notice_ = GainSaveError; noticeUntil_ = 0;
+    }
+    updatePendingState();
+}
+void SettingsWindow::updatePendingState() {
+    if (updatingControls_) return;
+    const auto window = window_.load();
+    const auto applied = engine_.settings();
+    auto current = draft();
+    // Reflect an external mic hotkey unless the checkbox itself has a draft.
+    if (current.microphoneMuted == appliedSettings_.microphoneMuted && applied.microphoneMuted != appliedSettings_.microphoneMuted) {
+        CheckDlgButton(window, IDC_MIC_MUTE, applied.microphoneMuted ? BST_CHECKED : BST_UNCHECKED);
+        current.microphoneMuted = applied.microphoneMuted;
+    }
+    const bool applicationsChanged = current.applications.size() != applied.applications.size() ||
+        std::any_of(current.applications.begin(), current.applications.end(), [&](const auto& path) {
+            return std::none_of(applied.applications.begin(), applied.applications.end(), [&](const auto& previous) { return samePath(path, previous); });
+        });
+    const bool sourceChanged = current.mode != applied.mode || applicationsChanged;
+    const bool micChanged = current.microphoneMuted != applied.microphoneMuted;
+    const bool updatesChanged = current.autoCheckUpdates != applied.autoCheckUpdates;
+    pendingSettings_ = sourceChanged || micChanged || updatesChanged;
+    appliedSettings_ = applied;
+    setControlText(window, IDC_SOURCE_GROUP, sourceChanged ? L"声音来源 *" : L"声音来源");
+    setControlText(window, IDC_MIC_MUTE, micChanged ? L"麦克风独立静音（共享声音继续发送） *" : L"麦克风独立静音（共享声音继续发送）");
+    setControlText(window, IDC_AUTO_UPDATE, updatesChanged ? L"每天自动检查 *" : L"每天自动检查");
+    setControlText(window, IDC_SETTINGS_HINT, pendingSettings_ ? L"有未应用的设置，请点击“应用设置”" :
+        gainsSaveFailed_ ? L"音量已生效，但未能保存" : gainsSavePending_ ? L"音量已实时生效 · 正在保存…" : L"音量实时生效 · 星号项需应用");
+    setControlText(window, IDC_APPLY, pendingSettings_ ? L"应用设置 *" : gainsSavePending_ ? L"保存音量" : L"应用设置");
+    EnableWindow(GetDlgItem(window, IDC_APPLY), pendingSettings_ || gainsSavePending_);
+    const bool warning = pendingSettings_ || gainsSaveFailed_;
+    if (warning != headerWarning_) {
+        headerWarning_ = warning;
+        const auto normal = font_ ? font_ : reinterpret_cast<HFONT>(SendMessageW(window, WM_GETFONT, 0, 0));
+        SendDlgItemMessageW(window, IDC_SETTINGS_HINT, WM_SETFONT, reinterpret_cast<WPARAM>(warning ? headerFont_ : normal), TRUE);
+    }
 }
 void SettingsWindow::stopMetering() {
     const auto window = window_.load();
@@ -265,7 +361,11 @@ void SettingsWindow::toggleMeters() {
     settings.showLevelMeters = IsDlgButtonChecked(window, IDC_SHOW_METERS) == BST_CHECKED;
     // The display toggle takes effect immediately, without applying unrelated
     // gain/application drafts currently being edited in the dialog.
-    if (saveSettings(settingsFile_, settings)) engine_.apply(std::move(settings));
+    if (saveSettings(settingsFile_, settings)) {
+        engine_.apply(std::move(settings));
+        KillTimer(window, 3); gainsSavePending_ = gainsSaveFailed_ = false;
+        if (notice_ == GainSaveError) { notice_.clear(); noticeUntil_ = 0; }
+    }
     else {
         CheckDlgButton(window, IDC_SHOW_METERS, previous ? BST_CHECKED : BST_UNCHECKED);
         notice_ = L"无法保存电平显示设置，请检查配置目录权限。"; noticeUntil_ = 0;
@@ -322,6 +422,7 @@ void SettingsWindow::updateStatus() {
         text = details.str();
     }
     SetDlgItemTextW(window, IDC_STATUS, text.c_str());
+    updatePendingState();
     refreshMetering();
 }
 void SettingsWindow::updateUpdateStatus() {

@@ -51,6 +51,11 @@ public:
         return value_;
     }
     bool overloaded() const noexcept { return overloadHold_ > 0; }
+    void rescale(float factor) noexcept {
+        if (!std::isfinite(factor) || factor <= 0) { reset(); return; }
+        value_ *= factor; target_ *= factor;
+        overloadHold_ = std::max(value_, target_) >= 1 ? 0.8f : 0;
+    }
     void reset() noexcept { value_ = target_ = hold_ = overloadHold_ = 0; }
 private:
     float value_ = 0, target_ = 0, hold_ = 0, overloadHold_ = 0;

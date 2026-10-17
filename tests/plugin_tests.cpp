@@ -49,6 +49,13 @@ HWND dialog() {
     }, reinterpret_cast<LPARAM>(&result)); return result;
 }
 void click(HWND window, int id) { SendMessageW(GetDlgItem(window, id), BM_CLICK, 0, 0); }
+void dragGain(HWND window, int id, int percent, WPARAM reason = TB_THUMBTRACK) {
+    SendDlgItemMessageW(window, id, TBM_SETPOS, TRUE, percent);
+    SendMessageW(window, WM_HSCROLL, reason, reinterpret_cast<LPARAM>(GetDlgItem(window, id)));
+}
+std::wstring controlText(HWND window, int id) {
+    wchar_t text[256]{}; GetDlgItemTextW(window, id, text, 256); return text;
+}
 std::wstring status(HWND window) {
     wchar_t text[2048]{}; GetDlgItemTextW(window, IDC_STATUS, text, 2048); return text;
 }
@@ -77,9 +84,10 @@ bool screenshot(HWND window, const std::wstring& path) {
 int main(int argc, char** argv) {
     SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     if (argc < 2) return 2;
-    bool capture = false, liveUpdates = false; std::filesystem::path imagePath;
+    bool capture = false, liveUpdates = false, gainProbe = false; std::filesystem::path imagePath;
     for (int i = 2; i < argc; ++i) {
         if (std::string(argv[i]) == "--capture") capture = true;
+        else if (std::string(argv[i]) == "--gain-probe") gainProbe = capture = true;
         else if (std::string(argv[i]) == "--updates") liveUpdates = true;
         else if (std::string(argv[i]) == "--screenshot" && i + 1 < argc) imagePath = argv[++i];
     }
@@ -134,19 +142,25 @@ int main(int argc, char** argv) {
         check(GetDlgItem(window, IDC_DESKTOP_METER) && GetDlgItem(window, IDC_MIC_METER), "separate shared-audio and microphone meters exist");
         check(IsDlgButtonChecked(window, IDC_SHOW_METERS) == BST_UNCHECKED && !IsWindowVisible(GetDlgItem(window, IDC_MIC_METER)),
             "meter display defaults off and bars are hidden");
-        SendDlgItemMessageW(window, IDC_MIC_SLIDER, TBM_SETPOS, TRUE, 250);
+        check(!IsWindowEnabled(GetDlgItem(window, IDC_APPLY)), "unchanged settings have no pending application");
+        click(window, IDC_AUTO_UPDATE);
+        check(IsWindowEnabled(GetDlgItem(window, IDC_APPLY)) && controlText(window, IDC_SETTINGS_HINT).find(L"未应用") != std::wstring::npos &&
+            controlText(window, IDC_AUTO_UPDATE).find(L'*') != std::wstring::npos, "unapplied changes have text and field markers");
         click(window, IDC_SHOW_METERS);
         check(IsWindowVisible(GetDlgItem(window, IDC_MIC_METER)) && GetPrivateProfileIntW(L"SoundBridge", L"ShowLevelMeters", 0, file.c_str()) == 1,
             "display toggle takes effect and saves immediately");
-        check(GetPrivateProfileIntW(L"SoundBridge", L"MicrophonePercent", 0, file.c_str()) == 100,
-            "display toggle does not apply unrelated gain drafts");
-        SendDlgItemMessageW(window, IDC_MIC_SLIDER, TBM_SETPOS, TRUE, 100);
+        check(GetPrivateProfileIntW(L"SoundBridge", L"AutoCheckUpdates", 1, file.c_str()) == 0,
+            "display toggle does not apply unrelated preference drafts");
+        click(window, IDC_AUTO_UPDATE);
+        check(!IsWindowEnabled(GetDlgItem(window, IDC_APPLY)), "reverting a draft clears pending state");
         check(SendDlgItemMessageW(window, IDC_DESKTOP_METER, PBM_GETPOS, 0, 0) == 0 &&
               SendDlgItemMessageW(window, IDC_MIC_METER, PBM_GETPOS, 0, 0) == 0, "inactive meters show silence");
         check(SendMessageW(window, WM_GETICON, ICON_BIG, 0) != 0, "SVG-derived window icon");
         check(IsDlgButtonChecked(window, IDC_AUTO_UPDATE) == BST_UNCHECKED, "saved update preference loaded");
         click(window, IDC_AUTO_UPDATE); click(window, IDC_APPLY);
         check(GetPrivateProfileIntW(L"SoundBridge", L"AutoCheckUpdates", 0, file.c_str()) == 1, "GUI automatic update preference saved");
+        check(!IsWindowEnabled(GetDlgItem(window, IDC_APPLY)) && controlText(window, IDC_AUTO_UPDATE).find(L'*') == std::wstring::npos,
+            "applying settings removes pending field and button state");
         click(window, IDC_AUTO_UPDATE); click(window, IDC_APPLY);
         check(IsDlgButtonChecked(window, IDC_MODE_ALL) == BST_CHECKED && !IsWindowEnabled(GetDlgItem(window, IDC_APPS)), "all-audio mode disables application selection");
         click(window, IDC_MODE_SELECTED);
@@ -182,7 +196,50 @@ int main(int argc, char** argv) {
             muted.store(0); click(window, IDC_START);
             const auto active = [&] { short value = 10000; int bits = 2; edit(42, &value, 1, 1, &bits); return value == 5000 && bits == 3; };
             if (!wait(active)) throw std::runtime_error("Real capture did not start against mocked SDK");
-            SendDlgItemMessageW(window, IDC_MIC_SLIDER, TBM_SETPOS, TRUE, 300); click(window, IDC_APPLY);
+            click(window, IDC_MODE_SELECTED);
+            dragGain(window, IDC_MIC_SLIDER, 150);
+            check(wait([&] { short value = 10000; int bits = 2; edit(42, &value, 1, 1, &bits); return value == 15000; }),
+                "dragging gain changes actual outgoing PCM without Apply");
+            check(wait([&] { return GetPrivateProfileIntW(L"SoundBridge", L"MicrophonePercent", 0, file.c_str()) == 150; }), "live gains auto-save after debounce");
+            check(GetPrivateProfileIntW(L"SoundBridge", L"Mode", 1, file.c_str()) == 0 &&
+                IsWindowEnabled(GetDlgItem(window, IDC_APPLY)) && controlText(window, IDC_SOURCE_GROUP).find(L'*') != std::wstring::npos,
+                "live gain save preserves pending source mode and its visual marker");
+            SendMessageW(window, WM_CLOSE, 0, 0); configure(nullptr, nullptr);
+            check(wait([&] { return IsWindowVisible(window); }) && IsDlgButtonChecked(window, IDC_MODE_SELECTED) == BST_CHECKED &&
+                controlText(window, IDC_SOURCE_GROUP).find(L'*') != std::wstring::npos, "hiding and reopening preserves unapplied source drafts");
+            click(window, IDC_MODE_ALL);
+            check(!IsWindowEnabled(GetDlgItem(window, IDC_APPLY)), "reverting source mode clears pending marker after gain save");
+            dragGain(window, IDC_MIC_SLIDER, 0);
+            check(wait([&] { short value = 10000; int bits = 2; edit(42, &value, 1, 1, &bits);
+                return value == 0 && SendDlgItemMessageW(window, IDC_MIC_METER, PBM_GETPOS, 0, 0) == 0; }),
+                "zero gain immediately silences outgoing PCM and clears meter hold");
+            dragGain(window, IDC_MIC_SLIDER, 50, TB_ENDTRACK);
+            if (gainProbe) {
+                const auto trace = [&](const char* phase, DWORD duration) {
+                    int output = 0;
+                    const auto until = GetTickCount64() + duration;
+                    while (GetTickCount64() < until) {
+                        short values[480]; std::fill_n(values, 480, static_cast<short>(4096));
+                        int bits = 2; edit(42, values, 480, 1, &bits); output = values[0]; Sleep(10);
+                    }
+                    wchar_t readout[64]{}; GetDlgItemTextW(window, IDC_MIC_LEVEL, readout, 64);
+                    std::cout << "GAIN_PROBE " << phase << " slider=" << SendDlgItemMessageW(window, IDC_MIC_SLIDER, TBM_GETPOS, 0, 0)
+                        << " pcm=" << output << " meter=";
+                    if (SendDlgItemMessageW(window, IDC_MIC_METER, PBM_GETPOS, 0, 0) == 0) std::cout << "silent";
+                    else std::cout << std::wcstod(readout, nullptr) << " dBFS";
+                    std::cout << '\n';
+                };
+                trace("baseline50", 2000);
+                SendDlgItemMessageW(window, IDC_MIC_SLIDER, TBM_SETPOS, TRUE, 300);
+                SendMessageW(window, WM_HSCROLL, TB_THUMBTRACK, reinterpret_cast<LPARAM>(GetDlgItem(window, IDC_MIC_SLIDER)));
+                trace("drag300_without_apply", 1500);
+                click(window, IDC_APPLY); trace("applied300", 1500);
+                SendDlgItemMessageW(window, IDC_MIC_SLIDER, TBM_SETPOS, TRUE, 0);
+                SendMessageW(window, WM_HSCROLL, TB_THUMBTRACK, reinterpret_cast<LPARAM>(GetDlgItem(window, IDC_MIC_SLIDER)));
+                click(window, IDC_APPLY); trace("applied_zero", 3000);
+                dragGain(window, IDC_MIC_SLIDER, 50, TB_ENDTRACK);
+            }
+            dragGain(window, IDC_MIC_SLIDER, 300);
             check(wait([&] {
                 short value = 16000; int bits = 2; edit(42, &value, 1, 1, &bits);
                 wchar_t readout[64]{}; GetDlgItemTextW(window, IDC_MIC_LEVEL, readout, 64);
@@ -210,7 +267,8 @@ int main(int argc, char** argv) {
             click(window, IDC_MIC_MUTE); click(window, IDC_APPLY);
             check(wait([&] { return SendDlgItemMessageW(window, IDC_MIC_METER, PBM_GETPOS, 0, 0) == 0; }), "independent mute clears microphone meter immediately");
             click(window, IDC_MIC_MUTE);
-            SendDlgItemMessageW(window, IDC_MIC_SLIDER, TBM_SETPOS, TRUE, 50); click(window, IDC_APPLY);
+            dragGain(window, IDC_MIC_SLIDER, 50);
+            click(window, IDC_APPLY);
             click(window, IDC_MODE_SELECTED); click(window, IDC_APPLY);
             check(wait([&] { return status(window).find(L"等待所选应用") != std::wstring::npos; }), "active mode switch releases all-audio capture and waits for selected apps");
             click(window, IDC_MODE_ALL); click(window, IDC_APPLY);
@@ -264,6 +322,10 @@ int main(int argc, char** argv) {
                 check(SendDlgItemMessageW(window, IDC_MIC_METER, PBM_GETPOS, 0, 0) > 0, "live microphone meter visible");
             }
             check(screenshot(window, std::filesystem::absolute(imagePath).wstring()), "GUI screenshot rendered");
+            click(window, IDC_AUTO_UPDATE);
+            const auto pendingImage = imagePath.parent_path() / (imagePath.stem().string() + "-pending.png");
+            check(screenshot(window, std::filesystem::absolute(pendingImage).wstring()), "pending-change GUI screenshot rendered");
+            click(window, IDC_AUTO_UPDATE);
             if (capture) click(window, IDC_STOP);
         }
         shutdown(); check(!IsWindow(window), "shutdown joins GUI and destroys window");

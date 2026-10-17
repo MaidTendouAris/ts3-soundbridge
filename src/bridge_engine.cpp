@@ -29,9 +29,16 @@ void BridgeEngine::apply(Settings settings) {
     {
         std::lock_guard<std::mutex> lock(settingsMutex_);
         routesChanged = settings.mode != settings_.mode || settings.applications != settings_.applications;
+        const bool gainsChanged = settings.desktopPercent != settings_.desktopPercent || settings.microphonePercent != settings_.microphonePercent;
         settings_ = std::move(settings);
-        desktopGain_.store(settings_.desktopPercent / 100.0f);
-        microphoneGain_.store(settings_.microphonePercent / 100.0f);
+        if (gainsChanged) {
+            // Commit gains and discard old-gain peaks between audio blocks.
+            // The callback only tries this mutex and never waits on the GUI.
+            std::lock_guard<std::mutex> audio(audioMutex_);
+            desktopGain_.store(settings_.desktopPercent / 100.0f);
+            microphoneGain_.store(settings_.microphonePercent / 100.0f);
+            peaks_.reset();
+        }
         micMuted_.store(settings_.microphoneMuted);
         metersEnabled_.store(settings_.showLevelMeters);
     }
