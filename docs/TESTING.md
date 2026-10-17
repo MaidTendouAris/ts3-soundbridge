@@ -12,6 +12,13 @@
 - 未应用项、顶部橙色提示、按钮星号与置灰状态正确；应用或还原后标记消失。正常和待定界面分别渲染检查，窗口尺寸不增加。
 - 增益变化在音频块之间提交并清除旧峰值，平滑状态按增益比例同步调整；保持电平总开关与原有发送／静音规则。
 
+GitHub [构建检查](https://github.com/MaidTendouAris/ts3-soundbridge/actions/runs/39013042919) 与 [发布工作流](https://github.com/MaidTendouAris/ts3-soundbridge/actions/runs/39013046040) 均成功；正式 [v1.1.2](https://github.com/MaidTendouAris/ts3-soundbridge/releases/tag/v1.1.2) 的附件只有安装包和校验文件。已重新下载并核对摘要、7 文件包结构和 1.1.2 版本；包内实际 DLL 的 `--gain-probe --updates` 通过，本地 dist 已同步为正式包。
+
+```text
+TS3-SoundBridge-1.1.2-win64.ts3_plugin
+SHA256: 3dd7325f642fc458fe639abb832080a2e487e57d3c746787e17982f4538f37ff
+```
+
 增益探针使用真实 Windows 回环与模拟 SDK，命令为 `soundbridge_plugin_tests <DLL> --gain-probe`，不连接服务器、不保存音频。真实 TS3 频道及长期兼容性仍待实测。以下保留历史记录。
 
 ## 1.1.1（2026-10-16）
