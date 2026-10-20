@@ -34,7 +34,7 @@ int selectedProbe(double seconds, const std::vector<std::wstring>& paths) {
     soundbridge::Settings settings;
     settings.mode = soundbridge::CaptureMode::SelectedApplications;
     settings.applications = paths; settings.desktopPercent = 100; settings.microphonePercent = 0;
-    soundbridge::BridgeEngine engine(settings, [](std::uint64_t, std::wstring&) { return true; });
+    soundbridge::BridgeEngine engine(settings, [](std::uint64_t, soundbridge::Message&) { return true; });
     engine.start(1);
     for (int i = 0; i < 400 && engine.status().phase != soundbridge::BridgePhase::Sharing; ++i) {
         if (engine.status().phase == soundbridge::BridgePhase::Error) return 1;
@@ -80,7 +80,7 @@ int selectedProbe(double seconds, const std::vector<std::wstring>& paths) {
 int watchSelected(double seconds, const std::wstring& path) {
     soundbridge::Settings settings; settings.mode = soundbridge::CaptureMode::SelectedApplications;
     settings.applications = {path}; settings.microphonePercent = 0;
-    soundbridge::BridgeEngine engine(settings, [](std::uint64_t, std::wstring&) { return true; });
+    soundbridge::BridgeEngine engine(settings, [](std::uint64_t, soundbridge::Message&) { return true; });
     engine.start(1);
     auto previous = soundbridge::BridgePhase::Stopped;
     std::size_t transitions = 0;

@@ -2,13 +2,13 @@
 
 <img src="assets/icon-256.png" width="88" alt="TS3 SoundBridge">
 
-Windows x64 的 TeamSpeak 3 实时音频共享插件。**1.1.2** 提供原生中文设置窗口，可以共享所有非当前 TS3 进程树的声音，或同时共享多个指定应用；再与麦克风混音发送。两路音量各支持 0–300%，拖动即时生效并自动保存，可按需开启平滑的增益后电平显示。其他尚未应用的修改有醒目提示。支持自动及手动更新检查，通过 GitHub Releases 分发，源码和图标采用 [MIT 协议](LICENSE)。设置调整全部通过 GUI 完成。
+Windows x64 的 TeamSpeak 3 实时音频共享插件。**1.1.3** 支持 English／简体中文／繁體中文／한국어／日本語，可在设置窗口即时切换。可以共享所有非当前 TS3 进程树的声音，或同时共享多个指定应用；再与麦克风混音发送。两路音量各支持 0–300%，拖动即时生效并自动保存，可按需开启平滑的增益后电平显示。其他尚未应用的修改有醒目提示。支持自动及手动更新检查，通过 GitHub Releases 分发，源码和图标采用 [MIT 协议](LICENSE)。设置调整全部通过 GUI 完成。
 
 本机已通过构建、GUI、混音、进程排除与多应用捕获测试。真实 TS3 频道的发送效果、听感和音质仍需验证。用户当前使用**持续发送**，插件保留 TS3 原有麦克风发言规则。
 
 ## 安装与使用
 
-1. 从 [GitHub Releases](https://github.com/MaidTendouAris/ts3-soundbridge/releases/latest) 下载 `TS3-SoundBridge-1.1.2-win64.ts3_plugin`，**完全退出 TS3** 后安装。文件关联未生效时，使用 TS3 安装目录的 `package_inst.exe` 打开。`SHA256SUMS.txt` 可核对文件完整性。
+1. 从 [GitHub Releases](https://github.com/MaidTendouAris/ts3-soundbridge/releases/latest) 下载 `TS3-SoundBridge-1.1.3-win64.ts3_plugin`，**完全退出 TS3** 后安装。文件关联未生效时，使用 TS3 安装目录的 `package_inst.exe` 打开。`SHA256SUMS.txt` 可核对文件完整性。
 2. 重启 TS3，启用 TS3 SoundBridge，连接测试频道。每次加载插件时共享默认关闭。
 3. 从“插件 → TS3 SoundBridge → SoundBridge 设置…”打开窗口；插件管理页面的“设置”按钮也可打开。
 4. 两路音量拖动即时生效并自动保存；选择来源或调整其他设置后，带星号的项目需要点击“应用设置”。
@@ -22,6 +22,7 @@ Windows x64 的 TeamSpeak 3 实时音频共享插件。**1.1.2** 提供原生中
 
 | 设置 | 行为 |
 | --- | --- |
+| 语言 / Language | 顶部下拉框提供五种语言，选择立即生效并保存，不中断共享或应用其他待定设置。首次使用跟随 Windows 显示语言，不支持的语言回退为英文。 |
 | 共享所有非 TeamSpeak 的声音 | 沿用原有模式，排除当前 TS3 进程及其子进程。 |
 | 只共享选定应用 | 勾选多个应用同时共享，包含各应用的子进程；不共享未选应用的声音。 |
 | 刷新应用 | 枚举活动输出设备上的音频应用。先打开应用并播放声音，再刷新、勾选。 |
@@ -44,6 +45,8 @@ Windows x64 的 TeamSpeak 3 实时音频共享插件。**1.1.2** 提供原生中
 电平条测量两路信号各自的峰值，位置在应用增益、麦克风发言门控／独立静音之后，最终混音及 PCM 限幅之前。多应用声音先相加，单声道时按实际输出下混；双声道时取两声道的较高峰值。采用基于实际时间的指数平滑，上升时间常数 80 ms、回落时间常数 350 ms，短峰值保持 100 ms，缓和跳动。数值也取平滑后的电平，持续超过满幅时可显示正 dBFS。绿色低于 -12 dBFS，黄色接近满幅；原始峰值达到 0 dBFS 时红色提示保持 800 ms，避免平滑掩盖短暂过载。两路相加也可能导致最终混音过载。停止、断线或切换服务器后归零。未开始共享时，插件不提供麦克风预览。
 
 模式、应用、两路音量、独立麦克风静音及电平显示偏好保存到 TS3 配置目录的 `TS3-SoundBridge.ini`，支持中文路径；共享开关不保存。插件菜单还提供开始／停止，可在 TS3 中绑定开始／停止、麦克风独立静音和打开设置三个热键。
+
+语言偏好也保存在该 INI 的 `SoundBridge/Language`，稳定代码为 `en`、`zh-CN`、`zh-TW`、`ko`、`ja`。设置、应用列表状态、运行详情、错误信息与更新结果即时切换；已有错误／更新结果无需重试。菜单与热键名称由 TS3 缓存，需要重新加载插件后更新，原有热键绑定保持有效。五种语言直接编译进 DLL，无需下载语言包。
 
 TS3 自带麦克风静音会**停止全部共享**。断线、切换服务器标签、禁用插件也停止共享；取消静音或重连后需手动开始。插件不修改 TS3 的持续发送、VAD 或 PTT 设置。首次采集后 DLL 会保留映射至进程结束，保护 Windows 异步激活回调，因此替换 DLL 前必须完全退出 TS3；禁用插件仍会停止线程并释放设备。
 
@@ -82,11 +85,14 @@ cd D:\github\ts3-soundbridge
 
 默认 SDK 路径为 `.deps/ts3-sdk`，可用 CMake 的 `TS3_SDK_DIR` 指定已有 SDK；构建脚本的 `-WindowsSdkVersion 10.0.26100.0` 可指定 Windows SDK。产物在 `build/Release` 与 `dist`，MSVC 运行库静态链接。
 
-构建自动运行音频核心、应用选择／设置保存、更新检查、插件 ABI／GUI 四组测试。下列音频测试使用真实 Windows 捕获与模拟 TS3 函数表，不连接服务器，不保存音频；音频测试会短暂播放 3% 振幅的测试音。
+构建自动运行音频核心、应用选择／设置保存、更新检查、多语言、插件 ABI／GUI 五组测试。下列音频测试使用真实 Windows 捕获与模拟 TS3 函数表，不连接服务器，不保存音频；音频测试会短暂播放 3% 振幅的测试音。
 
 ```powershell
 # GUI 操作、共享模式切换、静音／断线／标签切换停止与重载
 .\build\Release\soundbridge_plugin_tests.exe .\build\Release\ts3_soundbridge_win64.dll --capture
+
+# 五种语言界面截图，仅输出到本地（含本机应用列表）
+.\build\Release\soundbridge_plugin_tests.exe .\build\Release\ts3_soundbridge_win64.dll --locale-screenshots build\locales
 
 # 原有模式：捕获兄弟进程，排除目标进程
 .\scripts\test-loopback.ps1
@@ -103,4 +109,4 @@ cd D:\github\ts3-soundbridge
 
 测试记录与频道实测清单见 [docs/TESTING.md](docs/TESTING.md)，需求和交接见 [TS3-SoundBridge-PROJECT.md](TS3-SoundBridge-PROJECT.md)。
 
-GitHub Actions 对 main 和 PR 构建、测试并保留安装包；推送与版本匹配的 `vX.Y.Z` 标签后，Release 工作流重新构建和测试，发布安装包、校验值及 SVG／PNG／ICO。发布说明位于 `docs/releases/X.Y.Z.md`。已发布安装包不会被工作流覆盖。
+GitHub Actions 对 main 和 PR 构建、测试并保留安装包；推送与版本匹配的 `vX.Y.Z` 标签后，Release 工作流重新构建和测试，仅发布安装包与校验文件。发布说明位于 `docs/releases/X.Y.Z.md`。已发布安装包不会被工作流覆盖。

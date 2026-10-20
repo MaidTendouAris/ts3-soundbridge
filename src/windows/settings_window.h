@@ -18,6 +18,8 @@ private:
     INT_PTR handle(HWND dialog, UINT message, WPARAM wparam, LPARAM lparam);
     void run();
     void fill(const Settings& settings);
+    void localize();
+    void changeLanguage();
     Settings draft() const;
     bool apply();
     void refreshApplications(const std::vector<std::wstring>& selected);
@@ -35,7 +37,8 @@ private:
     void fitToScreen();
     BridgeEngine& engine_;
     UpdateChecker& updates_;
-    std::wstring settingsFile_, notice_;
+    std::wstring settingsFile_;
+    Message notice_;
     std::function<std::uint64_t()> currentServer_;
     std::vector<AudioApplication> applications_;
     std::atomic<HWND> window_{nullptr};

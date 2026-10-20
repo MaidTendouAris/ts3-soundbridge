@@ -9,6 +9,9 @@ Settings loadSettings(const std::wstring& file) {
     std::lock_guard<std::mutex> lock(profileMutex);
     Settings settings;
     if (file.empty()) return settings;
+    wchar_t language[85]{};
+    GetPrivateProfileStringW(L"SoundBridge", L"Language", L"", language, 85, file.c_str());
+    settings.language = languageFromCode(language, settings.language);
     settings.mode = GetPrivateProfileIntW(L"SoundBridge", L"Mode", 0, file.c_str()) == 1 ?
         CaptureMode::SelectedApplications : CaptureMode::AllOtherAudio;
     const auto readGain = [&](const wchar_t* key, int fallback) {
@@ -45,6 +48,7 @@ bool saveSettings(const std::wstring& file, const Settings& settings) {
     const auto write = [&](const wchar_t* section, const wchar_t* key, const std::wstring& value) {
         if (!WritePrivateProfileStringW(section, key, value.c_str(), file.c_str())) success = false;
     };
+    write(L"SoundBridge", L"Language", languageCode(settings.language));
     write(L"SoundBridge", L"Mode", settings.mode == CaptureMode::SelectedApplications ? L"1" : L"0");
     write(L"SoundBridge", L"DesktopPercent", std::to_wstring(std::clamp(settings.desktopPercent, 0, MaximumGainPercent)));
     write(L"SoundBridge", L"MicrophonePercent", std::to_wstring(std::clamp(settings.microphonePercent, 0, MaximumGainPercent)));

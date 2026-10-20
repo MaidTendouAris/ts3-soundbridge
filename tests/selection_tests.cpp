@@ -15,7 +15,7 @@ int main() {
         process(1, 0, L"C:\\launcher.exe"), process(10, 1, L"C:\\ts3.exe", 2), process(11, 10, L"C:\\ts-helper.exe", 3),
         process(20, 0, L"C:\\Player.exe"), process(21, 20, L"C:\\Player.exe", 2),
         process(22, 21, L"C:\\renderer.exe", 3), process(30, 0, L"C:\\Other.exe"), process(31, 0, L"C:\\Other.exe")};
-    std::wstring error;
+    Message error;
     auto roots = selectRoots(processes, {L"c:\\PLAYER.exe", L"C:\\renderer.exe", L"C:\\Other.exe"}, 10, error);
     check(error.empty() && roots.size() == 3 && roots[0].pid == 20 && roots[1].pid == 30 && roots[2].pid == 31, "deduplicate child trees, include independent instances and paths case-insensitively");
     for (const auto& path : {L"C:\\ts3.exe", L"C:\\ts-helper.exe", L"C:\\launcher.exe"}) {
@@ -46,7 +46,7 @@ int main() {
     WritePrivateProfileStringW(L"SoundBridge", L"MicrophonePercent", L"-1", file.c_str());
     check(loadSettings(file).desktopPercent == 50 && loadSettings(file).microphonePercent == 100, "invalid gain uses safe defaults");
     DeleteFileW(file.c_str());
-    BridgeEngine engine(settings, [](std::uint64_t, std::wstring& problem) { problem = L"disconnected"; return false; });
+    BridgeEngine engine(settings, [](std::uint64_t, soundbridge::Message& problem) { problem = L"disconnected"; return false; });
     check(engine.settings().desktopPercent == 300 && engine.settings().microphonePercent == 275, "engine retains expanded gains");
     auto outOfRange = settings; outOfRange.desktopPercent = 999; outOfRange.microphonePercent = -1; engine.apply(outOfRange);
     check(engine.settings().desktopPercent == 300 && engine.settings().microphonePercent == 0, "engine bounds expanded gains");

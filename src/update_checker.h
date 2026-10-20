@@ -1,4 +1,5 @@
 #pragma once
+#include "localization.h"
 #include <Windows.h>
 #include <atomic>
 #include <condition_variable>
@@ -15,7 +16,7 @@ inline constexpr wchar_t ReleasesUrlWide[] = L"https://github.com/MaidTendouAris
 enum class UpdatePhase { Idle, Checking, Current, Available, NoRelease, Error };
 struct UpdateResult {
     UpdatePhase phase = UpdatePhase::Idle;
-    std::wstring message = L"更新来自 GitHub Releases。";
+    Message message = Text::UpdateIdle;
     std::string version, pageUrl;
 };
 bool newerVersion(const std::string& candidate, const std::string& current);

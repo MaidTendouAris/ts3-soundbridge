@@ -23,7 +23,7 @@ std::optional<std::array<unsigned, 3>> versionParts(const std::string& text) {
     }
     return result;
 }
-UpdateResult failure(const std::wstring& text) { return {UpdatePhase::Error, text, {}, {}}; }
+UpdateResult failure(const Message& text) { return {UpdatePhase::Error, text, {}, {}}; }
 std::uint64_t unixTime() {
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count());
 }
@@ -40,29 +40,29 @@ bool automaticCheckDue(std::uint64_t now, std::uint64_t previous) {
     return !previous || previous > now || now - previous >= 24 * 60 * 60;
 }
 UpdateResult parseReleaseResponse(unsigned status, const std::string& body, const std::string& current) {
-    if (status == 404) return {UpdatePhase::NoRelease, L"尚无公开的正式版本。", {}, {}};
-    if (status == 403 || status == 429) return failure(L"GitHub 限制了请求，请稍后手动检查。");
-    if (status != 200) return failure(L"更新检查失败（HTTP " + std::to_wstring(status) + L"），请稍后重试。");
-    if (body.size() > 256 * 1024) return failure(L"更新响应过大，无法读取。");
+    if (status == 404) return {UpdatePhase::NoRelease, Text::NoRelease, {}, {}};
+    if (status == 403 || status == 429) return failure(Text::UpdateRateLimit);
+    if (status != 200) return failure({Text::UpdateHttpError, {std::to_wstring(status)}});
+    if (body.size() > 256 * 1024) return failure(Text::UpdateTooLarge);
     try {
         const auto json = nlohmann::json::parse(body);
         if (!json.is_object() || json.at("draft").get<bool>() || json.at("prerelease").get<bool>())
-            return failure(L"更新响应不是正式版本。");
+            return failure(Text::UpdateNotStable);
         const auto tag = json.at("tag_name").get<std::string>();
-        if (!versionParts(tag) || !versionParts(current)) return failure(L"更新版本号格式无效。");
+        if (!versionParts(tag) || !versionParts(current)) return failure(Text::UpdateInvalidVersion);
         const std::string version = tag.front() == 'v' ? tag.substr(1) : tag;
         const std::string page = std::string(ReleasesUrl) + "/tag/" + tag;
         const std::string name = "TS3-SoundBridge-" + version + "-win64.ts3_plugin";
         const std::string download = std::string(ReleasesUrl) + "/download/" + tag + "/" + name;
         bool found = false;
-        if (!json.at("assets").is_array()) return failure(L"更新安装包列表无效。");
+        if (!json.at("assets").is_array()) return failure(Text::UpdateInvalidAssets);
         for (const auto& asset : json.at("assets"))
             if (asset.at("name").get<std::string>() == name && asset.at("browser_download_url").get<std::string>() == download) found = true;
-        if (!found) return failure(L"正式版本尚未提供 Windows x64 安装包。");
+        if (!found) return failure(Text::UpdateNoInstaller);
         if (newerVersion(tag, current)) return {UpdatePhase::Available,
-            L"发现新版 " + std::wstring(version.begin(), version.end()) + L"；打开下载页获取安装包。", version, page};
-        return {UpdatePhase::Current, L"当前已是最新正式版本（" + std::wstring(current.begin(), current.end()) + L"）。", version, page};
-    } catch (...) { return failure(L"无法解析 GitHub 更新响应，请稍后重试。"); }
+            {Text::UpdateAvailable, {std::wstring(version.begin(), version.end())}}, version, page};
+        return {UpdatePhase::Current, {Text::UpdateCurrent, {std::wstring(current.begin(), current.end())}}, version, page};
+    } catch (...) { return failure(Text::UpdateParseError); }
 }
 UpdateChecker::UpdateChecker(std::wstring file, bool automatic, Notification notification, Fetcher fetcher, std::chrono::milliseconds delay)
     : settingsFile_(std::move(file)), notification_(std::move(notification)), fetcher_(std::move(fetcher)), automatic_(automatic), startupDelay_(delay) {
@@ -86,33 +86,33 @@ UpdateResult UpdateChecker::status() const { std::lock_guard<std::mutex> lock(mu
 UpdateResult UpdateChecker::fetch() {
     InternetHandle session{WinHttpOpen(L"TS3-SoundBridge/" SOUNDBRIDGE_VERSION_WSTRING,
         WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0)};
-    if (!session.value) return failure(L"无法初始化更新网络连接。");
+    if (!session.value) return failure(Text::UpdateInitError);
     WinHttpSetTimeouts(session.value, 2000, 2000, 2000, 2000);
     InternetHandle connection{WinHttpConnect(session.value, L"api.github.com", INTERNET_DEFAULT_HTTPS_PORT, 0)};
-    if (!connection.value) return failure(L"无法连接 GitHub，请检查网络。");
+    if (!connection.value) return failure(Text::UpdateConnectError);
     InternetHandle request{WinHttpOpenRequest(connection.value, L"GET", L"/repos/MaidTendouAris/ts3-soundbridge/releases/latest",
         nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE)};
-    if (!request.value) return failure(L"无法创建更新请求。");
+    if (!request.value) return failure(Text::UpdateRequestError);
     DWORD policy = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
     WinHttpSetOption(request.value, WINHTTP_OPTION_REDIRECT_POLICY, &policy, sizeof(policy));
     const wchar_t headers[] = L"Accept: application/vnd.github+json\r\nX-GitHub-Api-Version: 2026-03-10\r\n";
     if (!WinHttpSendRequest(request.value, headers, static_cast<DWORD>(-1), WINHTTP_NO_REQUEST_DATA, 0, 0, 0) || !WinHttpReceiveResponse(request.value, nullptr))
-        return failure(L"无法读取 GitHub，请检查网络后重试。");
+        return failure(Text::UpdateReadError);
     DWORD httpStatus = 0, length = sizeof(httpStatus);
     if (!WinHttpQueryHeaders(request.value, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
-        &httpStatus, &length, WINHTTP_NO_HEADER_INDEX)) return failure(L"无法读取更新状态。");
+        &httpStatus, &length, WINHTTP_NO_HEADER_INDEX)) return failure(Text::UpdateStatusError);
     if (httpStatus != 200) return parseReleaseResponse(httpStatus, {}, SOUNDBRIDGE_VERSION_STRING);
     std::string body;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     while (std::chrono::steady_clock::now() < deadline) {
-        { std::lock_guard<std::mutex> lock(mutex_); if (closing_) return failure(L"检查已取消。"); }
+        { std::lock_guard<std::mutex> lock(mutex_); if (closing_) return failure(Text::UpdateCancelled); }
         char bytes[8192]; DWORD read = 0;
-        if (!WinHttpReadData(request.value, bytes, sizeof(bytes), &read)) return failure(L"更新响应读取中断，请稍后重试。");
+        if (!WinHttpReadData(request.value, bytes, sizeof(bytes), &read)) return failure(Text::UpdateInterrupted);
         if (!read) return parseReleaseResponse(httpStatus, body, SOUNDBRIDGE_VERSION_STRING);
         body.append(bytes, read);
-        if (body.size() > 256 * 1024) return failure(L"更新响应过大，无法读取。");
+        if (body.size() > 256 * 1024) return failure(Text::UpdateTooLarge);
     }
-    return failure(L"更新检查超时，请稍后重试。");
+    return failure(Text::UpdateTimeout);
 }
 void UpdateChecker::run() noexcept {
     try {
@@ -125,7 +125,7 @@ void UpdateChecker::run() noexcept {
             const bool automatic = automatic_ && std::chrono::steady_clock::now() >= startup && automaticCheckDue(now, lastAutomatic);
             if (!manual_ && !automatic) { wake_.wait_for(lock, std::chrono::seconds(1)); continue; }
             manual_ = false;
-            status_ = {UpdatePhase::Checking, L"正在检查 GitHub 更新…", {}, {}};
+            status_ = {UpdatePhase::Checking, Text::UpdateChecking, {}, {}};
             lock.unlock();
             lastAutomatic = now; saveLastUpdateCheck(settingsFile_, now);
             auto result = fetcher_ ? fetcher_() : fetch();
@@ -136,7 +136,7 @@ void UpdateChecker::run() noexcept {
             }
         }
     } catch (...) {
-        std::lock_guard<std::mutex> lock(mutex_); status_ = failure(L"更新检查失败，请重新加载插件。");
+        std::lock_guard<std::mutex> lock(mutex_); status_ = failure(Text::UpdateError);
     }
 }
 }

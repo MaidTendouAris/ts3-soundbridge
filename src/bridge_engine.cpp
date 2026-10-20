@@ -67,11 +67,11 @@ void BridgeEngine::start(std::uint64_t server) {
     callbacks_.store(0); mixedFrames_.store(0); underruns_.store(0);
     // A zero server still generates a validation error visible in the GUI.
     revision_.fetch_add(1); wake_.notify_all();
-    if (!server) setStatus(BridgePhase::Error, L"请先连接 TS3 服务器，再开始共享。");
+    if (!server) setStatus(BridgePhase::Error, Text::ConnectFirst);
 }
 void BridgeEngine::stop() noexcept {
     activeServer_.store(0); requestedServer_.store(0); revision_.fetch_add(1); wake_.notify_all();
-    setStatus(BridgePhase::Stopped, L"共享已关闭。");
+    setStatus(BridgePhase::Stopped, Text::Stopped);
 }
 void BridgeEngine::stopFor(std::uint64_t server) noexcept {
     auto expected = server;
@@ -86,7 +86,7 @@ void BridgeEngine::serverChanged(std::uint64_t server) noexcept {
 void BridgeEngine::toggleMicrophone() {
     auto current = settings(); current.microphoneMuted = !current.microphoneMuted; apply(std::move(current));
 }
-void BridgeEngine::setStatus(BridgePhase phase, const std::wstring& message) {
+void BridgeEngine::setStatus(BridgePhase phase, const Message& message) {
     std::lock_guard<std::mutex> lock(statusMutex_);
     status_.phase = phase; status_.message = message;
     status_.server = requestedServer_.load();
@@ -98,7 +98,7 @@ void BridgeEngine::clearSources() {
     // Joining capture threads takes place outside the audio-callback mutex.
     old.clear();
 }
-bool BridgeEngine::reconcile(const std::vector<ProcessInfo>& roots, bool include, std::uint64_t revision, std::wstring& error) {
+bool BridgeEngine::reconcile(const std::vector<ProcessInfo>& roots, bool include, std::uint64_t revision, Message& error) {
     std::vector<std::unique_ptr<Source>> removed;
     {
         std::lock_guard<std::mutex> lock(audioMutex_);
@@ -126,8 +126,8 @@ bool BridgeEngine::reconcile(const std::vector<ProcessInfo>& roots, bool include
         const HRESULT result = source->capture.start(root.pid, include);
         if (FAILED(result)) {
             std::wostringstream text;
-            text << L"无法采集 " << root.name << L"（0x" << std::hex << static_cast<unsigned long>(result) << L"）。请检查音频设备后重新开始。";
-            error = text.str(); return false;
+            text << std::hex << static_cast<unsigned long>(result);
+            error = {Text::CaptureAppError, {root.name, text.str()}}; return false;
         }
         if (closing_.load() || revision_.load() != revision) return false;
         std::lock_guard<std::mutex> lock(audioMutex_); sources_.push_back(std::move(source));
@@ -162,16 +162,16 @@ void BridgeEngine::run() noexcept {
             if (!server) {
                 clearSources();
                 // Retain actionable start errors until the user changes settings/start.
-                if (status().phase != BridgePhase::Error) setStatus(BridgePhase::Stopped, L"共享已关闭。");
+                if (status().phase != BridgePhase::Error) setStatus(BridgePhase::Stopped, Text::Stopped);
             } else {
-                std::wstring error;
+                Message error;
                 if (!validator_(server, error)) {
                     stopFor(server); clearSources(); setStatus(BridgePhase::Error, error);
                 } else if (current.mode == CaptureMode::SelectedApplications && current.applications.empty()) {
-                    stopFor(server); clearSources(); setStatus(BridgePhase::Error, L"请至少勾选一个应用。");
+                    stopFor(server); clearSources(); setStatus(BridgePhase::Error, Text::SelectApp);
                 } else {
                     if (revision != seenRevision) {
-                        clearSources(); setStatus(BridgePhase::Starting, L"正在准备音频共享…");
+                        clearSources(); setStatus(BridgePhase::Starting, Text::Preparing);
                     }
                     std::vector<ProcessInfo> roots;
                     const bool include = current.mode == CaptureMode::SelectedApplications;
@@ -179,7 +179,7 @@ void BridgeEngine::run() noexcept {
                     else { ProcessInfo self; if (queryProcess(GetCurrentProcessId(), self)) roots.push_back(std::move(self)); }
                     if (!error.empty() || !reconcile(roots, include, revision, error)) {
                         if (revision_.load() == revision && !closing_.load()) {
-                            stopFor(server); clearSources(); setStatus(BridgePhase::Error, error.empty() ? L"无法建立音频采集。" : error);
+                            stopFor(server); clearSources(); setStatus(BridgePhase::Error, error.empty() ? Text::CaptureFailed : error);
                         }
                     } else if (revision_.load() == revision && requestedServer_.load() == server) {
                         // Recheck native mute/connection after potentially slow activation.
@@ -189,7 +189,7 @@ void BridgeEngine::run() noexcept {
                             std::size_t sourceCount;
                             { std::lock_guard<std::mutex> lock(audioMutex_); sourceCount = sources_.size(); }
                             setStatus(sourceCount ? BridgePhase::Sharing : BridgePhase::Waiting,
-                                sourceCount ? L"共享中 · 麦克风遵循 TS3 原有发言规则。" : L"等待所选应用运行；应用启动后会自动开始采集。" );
+                                sourceCount ? Text::Sharing : Text::Waiting );
                         }
                     }
                 }
@@ -201,7 +201,7 @@ void BridgeEngine::run() noexcept {
         }
     } catch (...) {
         activeServer_.store(0); requestedServer_.store(0);
-        setStatus(BridgePhase::Error, L"音频操作失败，共享已停止。请重新加载插件。");
+        setStatus(BridgePhase::Error, Text::AudioError);
     }
     clearSources();
 }

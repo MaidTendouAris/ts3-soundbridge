@@ -11,7 +11,6 @@
 namespace soundbridge {
 namespace {
 void windowModuleAddress() {}
-constexpr auto GainSaveError = L"音量已实时生效，但无法保存。请检查配置目录权限后重试。";
 void setControlText(HWND window, int id, const wchar_t* text) {
     wchar_t previous[256]{}; GetDlgItemTextW(window, id, previous, 256);
     if (std::wstring(previous) != text) SetDlgItemTextW(window, id, text);
@@ -78,12 +77,11 @@ INT_PTR CALLBACK SettingsWindow::procedure(HWND dialog, UINT message, WPARAM wpa
     }
     if (!self) return FALSE;
     try { return self->handle(dialog, message, wparam, lparam); }
-    catch (...) { SetDlgItemTextW(dialog, IDC_STATUS, L"设置操作失败，请关闭窗口后重试。"); return TRUE; }
+    catch (...) { SetDlgItemTextW(dialog, IDC_STATUS, tr(Text::SettingsError)); return TRUE; }
 }
 INT_PTR SettingsWindow::handle(HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
     case WM_INITDIALOG: {
-        SetDlgItemTextW(dialog, IDC_UPDATE_GROUP, L"版本 " SOUNDBRIDGE_VERSION_WSTRING L" · 更新");
         HMODULE module = nullptr;
         GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, reinterpret_cast<LPCWSTR>(&windowModuleAddress), &module);
         const auto dpi = GetDpiForWindow(dialog);
@@ -97,7 +95,7 @@ INT_PTR SettingsWindow::handle(HWND dialog, UINT message, WPARAM wparam, LPARAM 
         SetWindowTheme(list, L"Explorer", nullptr);
         LVCOLUMNW column{}; column.mask = LVCF_TEXT | LVCF_WIDTH;
         RECT client{}; GetClientRect(list, &client);
-        const wchar_t* labels[] = { L"应用", L"状态", L"程序路径" };
+        const wchar_t* labels[] = { tr(Text::AppColumn), tr(Text::StateColumn), tr(Text::PathColumn) };
         const int percentages[] = { 37, 17, 46 };
         for (int i = 0; i < 3; ++i) {
             column.pszText = const_cast<wchar_t*>(labels[i]); column.cx = (client.right - 20) * percentages[i] / 100;
@@ -115,6 +113,8 @@ INT_PTR SettingsWindow::handle(HWND dialog, UINT message, WPARAM wparam, LPARAM 
             SendMessageW(meter, PBM_SETRANGE32, 0, 600);
             SendMessageW(meter, PBM_SETBKCOLOR, 0, RGB(230, 232, 238));
         }
+        for (int i = 0; i < static_cast<int>(Language::Count); ++i)
+            SendDlgItemMessageW(dialog, IDC_LANGUAGE, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(languageName(static_cast<Language>(i))));
         fitToScreen(); fill(engine_.settings());
         SetTimer(dialog, 1, 500, nullptr);
         return TRUE;
@@ -155,6 +155,9 @@ INT_PTR SettingsWindow::handle(HWND dialog, UINT message, WPARAM wparam, LPARAM 
         return FALSE;
     case WM_COMMAND:
         switch (LOWORD(wparam)) {
+        case IDC_LANGUAGE:
+            if (HIWORD(wparam) == CBN_SELCHANGE && !updatingControls_) changeLanguage();
+            return TRUE;
         case IDCANCEL: saveLiveGains(); stopMetering(); ShowWindow(dialog, SW_HIDE); return TRUE;
         case IDC_SHOW_METERS: toggleMeters(); return TRUE;
         case IDC_MODE_ALL: case IDC_MODE_SELECTED: updateMode(); updatePendingState(); return TRUE;
@@ -195,12 +198,80 @@ void SettingsWindow::fill(const Settings& settings) {
     CheckDlgButton(window, IDC_MIC_MUTE, settings.microphoneMuted ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(window, IDC_SHOW_METERS, settings.showLevelMeters ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(window, IDC_AUTO_UPDATE, settings.autoCheckUpdates ? BST_CHECKED : BST_UNCHECKED);
-    refreshApplications(settings.applications); updateLabels(); updateMode();
+    refreshApplications(settings.applications); localize(); updateLabels(); updateMode();
     updatingControls_ = false; updateStatus(); updateUpdateStatus();
+}
+void SettingsWindow::localize() {
+    const auto window = window_.load();
+    const bool wasUpdating = updatingControls_; updatingControls_ = true;
+    const auto language = engine_.settings().language;
+    setLanguage(language);
+    SetWindowTextW(window, tr(Text::WindowTitle));
+    const std::pair<int, Text> controls[] = {
+        {IDC_HEADER, Text::Header}, {IDC_LANGUAGE_LABEL, Text::LanguageLabel}, {IDC_MODE_ALL, Text::ModeAll},
+        {IDC_MODE_SELECTED, Text::ModeSelected}, {IDC_APP_HINT, Text::AppHint}, {IDC_CLEAR, Text::Clear},
+        {IDC_REFRESH, Text::Refresh}, {IDC_VOLUME_GROUP, Text::VolumeGroup}, {IDC_SHOW_METERS, Text::ShowMeters},
+        {IDC_SHARED_LABEL, Text::SharedAudio}, {IDC_MIC_LABEL, Text::Microphone}, {IDC_STATUS_LABEL, Text::StatusLabel},
+        {IDC_DETAILS, Text::Details}, {IDC_CHECK_UPDATE, Text::CheckUpdate}, {IDC_DOWNLOAD_UPDATE, Text::Releases},
+        {IDC_START, Text::Start}, {IDC_STOP, Text::Stop}, {IDCANCEL, Text::Close}
+    };
+    for (const auto& control : controls) SetDlgItemTextW(window, control.first, tr(control.second));
+    SetDlgItemTextW(window, IDC_UPDATE_GROUP, format(Text::UpdateGroup, {SOUNDBRIDGE_VERSION_WSTRING}).c_str());
+    SendDlgItemMessageW(window, IDC_LANGUAGE, CB_SETCURSEL, static_cast<int>(language), 0);
+    const auto list = GetDlgItem(window, IDC_APPS);
+    const Text columns[] = {Text::AppColumn, Text::StateColumn, Text::PathColumn};
+    LVCOLUMNW column{}; column.mask = LVCF_TEXT;
+    for (int i = 0; i < 3; ++i) {
+        column.pszText = const_cast<wchar_t*>(tr(columns[i])); ListView_SetColumn(list, i, &column);
+    }
+    for (int i = 0; i < static_cast<int>(applications_.size()); ++i) {
+        const auto& app = applications_[i];
+        const auto state = app.pids.empty() ? Text::NotDetected : app.playing ? Text::Playing : Text::Paused;
+        ListView_SetItemText(list, i, 1, const_cast<wchar_t*>(tr(state)));
+    }
+    LOGFONTW font{};
+    const auto previousFont = font_, previousHeader = headerFont_;
+    GetObjectW(previousFont ? previousFont : reinterpret_cast<HFONT>(SendMessageW(window, WM_GETFONT, 0, 0)), sizeof(font), &font);
+    const wchar_t* faces[] = {L"Segoe UI", L"Microsoft YaHei UI", L"Microsoft JhengHei UI", L"Malgun Gothic", L"Yu Gothic UI"};
+    wcscpy_s(font.lfFaceName, faces[static_cast<int>(language)]);
+    font.lfWeight = FW_NORMAL; font_ = CreateFontIndirectW(&font);
+    font.lfWeight = FW_SEMIBOLD; font.lfHeight = static_cast<LONG>(font.lfHeight * 1.2);
+    headerFont_ = CreateFontIndirectW(&font);
+    for (HWND child = GetWindow(window, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT))
+        SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
+    SendDlgItemMessageW(window, IDC_HEADER, WM_SETFONT, reinterpret_cast<WPARAM>(headerFont_), TRUE);
+    if (headerWarning_) SendDlgItemMessageW(window, IDC_SETTINGS_HINT, WM_SETFONT, reinterpret_cast<WPARAM>(headerFont_), TRUE);
+    if (previousFont) DeleteObject(previousFont);
+    if (previousHeader) DeleteObject(previousHeader);
+    updatingControls_ = wasUpdating;
+    updateStatus(); updateUpdateStatus();
+    InvalidateRect(window, nullptr, TRUE);
+}
+void SettingsWindow::changeLanguage() {
+    const auto window = window_.load();
+    const auto index = SendDlgItemMessageW(window, IDC_LANGUAGE, CB_GETCURSEL, 0, 0);
+    if (index < 0 || index >= static_cast<int>(Language::Count)) return;
+    auto settings = engine_.settings();
+    const auto previous = settings.language;
+    settings.language = static_cast<Language>(index);
+    if (settings.language == previous) return;
+    // Save only applied state plus the language; leave other controls as drafts.
+    if (!saveSettings(settingsFile_, settings)) {
+        SendDlgItemMessageW(window, IDC_LANGUAGE, CB_SETCURSEL, static_cast<int>(previous), 0);
+        notice_ = Text::SettingsSaveError; noticeUntil_ = 0; updateStatus(); return;
+    }
+    engine_.apply(std::move(settings));
+    KillTimer(window, 3); gainsSavePending_ = gainsSaveFailed_ = false;
+    if (engine_.status().phase != BridgePhase::Error &&
+        (notice_.empty() || notice_.key == Text::LanguageSaved || notice_.key == Text::SettingsApplied)) {
+        notice_ = Text::LanguageSaved; noticeUntil_ = GetTickCount64() + 6000;
+    }
+    else if (notice_.key == Text::GainSaveError) { notice_.clear(); noticeUntil_ = 0; }
+    localize();
 }
 Settings SettingsWindow::draft() const {
     const auto window = window_.load();
-    Settings settings;
+    Settings settings; settings.language = engine_.settings().language;
     settings.mode = IsDlgButtonChecked(window, IDC_MODE_SELECTED) == BST_CHECKED ? CaptureMode::SelectedApplications : CaptureMode::AllOtherAudio;
     settings.desktopPercent = static_cast<int>(SendDlgItemMessageW(window, IDC_DESKTOP_SLIDER, TBM_GETPOS, 0, 0));
     settings.microphonePercent = static_cast<int>(SendDlgItemMessageW(window, IDC_MIC_SLIDER, TBM_GETPOS, 0, 0));
@@ -215,18 +286,18 @@ Settings SettingsWindow::draft() const {
 bool SettingsWindow::apply() {
     const auto settings = draft();
     if (settings.applications.size() > 64) {
-        notice_ = L"最多可保存 64 个应用，请减少选择。"; noticeUntil_ = 0; updateStatus(); return false;
+        notice_ = Text::TooManyApps; noticeUntil_ = 0; updateStatus(); return false;
     }
     if (settings.mode == CaptureMode::SelectedApplications && settings.applications.empty()) {
-        notice_ = L"请勾选至少一个应用，然后应用设置。"; noticeUntil_ = 0; updateStatus(); return false;
+        notice_ = Text::SelectAppApply; noticeUntil_ = 0; updateStatus(); return false;
     }
     if (!saveSettings(settingsFile_, settings)) {
-        notice_ = L"无法保存设置，请检查 TS3 配置目录的写入权限。"; noticeUntil_ = 0; updateStatus(); return false;
+        notice_ = Text::SettingsSaveError; noticeUntil_ = 0; updateStatus(); return false;
     }
     engine_.apply(settings); updates_.setAutomatic(settings.autoCheckUpdates);
     KillTimer(window_.load(), 3); gainsSavePending_ = gainsSaveFailed_ = false;
     appliedSettings_ = settings;
-    notice_ = L"设置已应用并保存。"; noticeUntil_ = GetTickCount64() + 2000; updateStatus(); return true;
+    notice_ = Text::SettingsApplied; noticeUntil_ = GetTickCount64() + 2000; updateStatus(); return true;
 }
 void SettingsWindow::refreshApplications(const std::vector<std::wstring>& selected) {
     const bool wasUpdating = updatingControls_; updatingControls_ = true;
@@ -244,7 +315,7 @@ void SettingsWindow::refreshApplications(const std::vector<std::wstring>& select
         auto& app = applications_[i];
         LVITEMW item{}; item.mask = LVIF_TEXT; item.iItem = static_cast<int>(i); item.pszText = app.name.data();
         const int row = ListView_InsertItem(list, &item);
-        const wchar_t* state = app.pids.empty() ? L"未检测到" : app.playing ? L"正在播放" : L"已暂停";
+        const wchar_t* state = app.pids.empty() ? tr(Text::NotDetected) : app.playing ? tr(Text::Playing) : tr(Text::Paused);
         ListView_SetItemText(list, row, 1, const_cast<wchar_t*>(state));
         ListView_SetItemText(list, row, 2, app.path.data());
         ListView_SetCheckState(list, row, std::any_of(selected.begin(), selected.end(), [&](const auto& path) { return samePath(path, app.path); }));
@@ -285,11 +356,11 @@ void SettingsWindow::saveLiveGains() {
     if (!gainsSavePending_) return;
     if (saveSettings(settingsFile_, engine_.settings())) {
         gainsSavePending_ = gainsSaveFailed_ = false;
-        if (notice_ == GainSaveError) { notice_.clear(); noticeUntil_ = 0; }
+        if (notice_.key == Text::GainSaveError) { notice_.clear(); noticeUntil_ = 0; }
     }
     else {
         gainsSaveFailed_ = true;
-        notice_ = GainSaveError; noticeUntil_ = 0;
+        notice_ = Text::GainSaveError; noticeUntil_ = 0;
     }
     updatePendingState();
 }
@@ -312,12 +383,16 @@ void SettingsWindow::updatePendingState() {
     const bool updatesChanged = current.autoCheckUpdates != applied.autoCheckUpdates;
     pendingSettings_ = sourceChanged || micChanged || updatesChanged;
     appliedSettings_ = applied;
-    setControlText(window, IDC_SOURCE_GROUP, sourceChanged ? L"声音来源 *" : L"声音来源");
-    setControlText(window, IDC_MIC_MUTE, micChanged ? L"麦克风独立静音（共享声音继续发送） *" : L"麦克风独立静音（共享声音继续发送）");
-    setControlText(window, IDC_AUTO_UPDATE, updatesChanged ? L"每天自动检查 *" : L"每天自动检查");
-    setControlText(window, IDC_SETTINGS_HINT, pendingSettings_ ? L"有未应用的设置，请点击“应用设置”" :
-        gainsSaveFailed_ ? L"音量已生效，但未能保存" : gainsSavePending_ ? L"音量已实时生效 · 正在保存…" : L"音量实时生效 · 星号项需应用");
-    setControlText(window, IDC_APPLY, pendingSettings_ ? L"应用设置 *" : gainsSavePending_ ? L"保存音量" : L"应用设置");
+    const auto mark = [&](int id, Text key, bool changed) {
+        const auto text = std::wstring(tr(key)) + (changed ? L" *" : L"");
+        setControlText(window, id, text.c_str());
+    };
+    mark(IDC_SOURCE_GROUP, Text::SourceGroup, sourceChanged);
+    mark(IDC_MIC_MUTE, Text::MicMute, micChanged);
+    mark(IDC_AUTO_UPDATE, Text::AutoUpdate, updatesChanged);
+    setControlText(window, IDC_SETTINGS_HINT, tr(pendingSettings_ ? Text::PendingHint :
+        gainsSaveFailed_ ? Text::GainFailedHint : gainsSavePending_ ? Text::GainSavingHint : Text::SettingsHint));
+    mark(IDC_APPLY, gainsSavePending_ && !pendingSettings_ ? Text::SaveVolume : Text::Apply, pendingSettings_);
     EnableWindow(GetDlgItem(window, IDC_APPLY), pendingSettings_ || gainsSavePending_);
     const bool warning = pendingSettings_ || gainsSaveFailed_;
     if (warning != headerWarning_) {
@@ -340,7 +415,7 @@ void SettingsWindow::refreshMetering() {
     const bool show = IsDlgButtonChecked(window, IDC_SHOW_METERS) == BST_CHECKED;
     for (int id : {IDC_DESKTOP_METER, IDC_MIC_METER, IDC_DESKTOP_LEVEL, IDC_MIC_LEVEL})
         ShowWindow(GetDlgItem(window, id), show ? SW_SHOW : SW_HIDE);
-    const wchar_t* hint = show ? L"-60 → 0 dBFS · 红色：近期过载" : L"电平已关闭，可按需开启。";
+    const wchar_t* hint = show ? tr(Text::MeterHint) : tr(Text::MetersOff);
     wchar_t previous[64]{}; GetDlgItemTextW(window, IDC_METER_HINT, previous, 64);
     if (std::wstring(previous) != hint) SetDlgItemTextW(window, IDC_METER_HINT, hint);
     const bool run = show && IsWindowVisible(window) && !IsIconic(window) && engine_.requestedServer() != 0;
@@ -351,7 +426,7 @@ void SettingsWindow::refreshMetering() {
     meterTimerRunning_ = SetTimer(window, 2, 33, nullptr) != 0;
     if (!meterTimerRunning_) {
         engine_.setMeteringVisible(false);
-        SetDlgItemTextW(window, IDC_METER_HINT, L"电平刷新启动失败，请重新打开设置。" );
+        SetDlgItemTextW(window, IDC_METER_HINT, tr(Text::MeterError) );
     }
 }
 void SettingsWindow::toggleMeters() {
@@ -364,11 +439,11 @@ void SettingsWindow::toggleMeters() {
     if (saveSettings(settingsFile_, settings)) {
         engine_.apply(std::move(settings));
         KillTimer(window, 3); gainsSavePending_ = gainsSaveFailed_ = false;
-        if (notice_ == GainSaveError) { notice_.clear(); noticeUntil_ = 0; }
+        if (notice_.key == Text::GainSaveError) { notice_.clear(); noticeUntil_ = 0; }
     }
     else {
         CheckDlgButton(window, IDC_SHOW_METERS, previous ? BST_CHECKED : BST_UNCHECKED);
-        notice_ = L"无法保存电平显示设置，请检查配置目录权限。"; noticeUntil_ = 0;
+        notice_ = Text::MeterSaveError; noticeUntil_ = 0;
     }
     updateStatus();
 }
@@ -414,12 +489,10 @@ void SettingsWindow::updateStatus() {
     const bool requested = engine_.requestedServer() != 0;
     EnableWindow(GetDlgItem(window, IDC_STOP), requested);
     EnableWindow(GetDlgItem(window, IDC_START), !requested);
-    std::wstring text = notice_.empty() ? status.message : notice_;
+    std::wstring text = notice_.empty() ? status.message.str() : notice_.str();
     if (IsDlgButtonChecked(window, IDC_DETAILS) == BST_CHECKED) {
-        std::wostringstream details;
-        details << text << L"\n音频源 " << status.sources << L" · 采集 " << status.capturedFrames << L" · 回调 " << status.callbacks
-                << L" · 积压 " << status.queuedFrames << L" · 丢弃 " << status.dropped << L" · 修剪 " << status.trimmed;
-        text = details.str();
+        text += L"\n" + format(Text::Statistics, {std::to_wstring(status.sources), std::to_wstring(status.capturedFrames),
+            std::to_wstring(status.callbacks), std::to_wstring(status.queuedFrames), std::to_wstring(status.dropped), std::to_wstring(status.trimmed)});
     }
     SetDlgItemTextW(window, IDC_STATUS, text.c_str());
     updatePendingState();
@@ -427,7 +500,7 @@ void SettingsWindow::updateStatus() {
 }
 void SettingsWindow::updateUpdateStatus() {
     const auto result = updates_.status(); const auto window = window_.load();
-    SetDlgItemTextW(window, IDC_UPDATE_STATUS, result.message.c_str());
+    SetDlgItemTextW(window, IDC_UPDATE_STATUS, result.message.str().c_str());
     EnableWindow(GetDlgItem(window, IDC_CHECK_UPDATE), result.phase != UpdatePhase::Checking);
 }
 void SettingsWindow::fitToScreen() {

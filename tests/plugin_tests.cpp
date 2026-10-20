@@ -42,13 +42,17 @@ HWND dialog() {
     EnumWindows([](HWND candidate, LPARAM data) -> BOOL {
         DWORD pid = 0; GetWindowThreadProcessId(candidate, &pid);
         wchar_t title[128]{}; GetWindowTextW(candidate, title, 128);
-        if (pid == GetCurrentProcessId() && std::wstring(title) == L"TS3 SoundBridge · 设置") {
+        if (pid == GetCurrentProcessId() && std::wstring(title).rfind(L"TS3 SoundBridge · ", 0) == 0) {
             *reinterpret_cast<HWND*>(data) = candidate; return FALSE;
         }
         return TRUE;
     }, reinterpret_cast<LPARAM>(&result)); return result;
 }
 void click(HWND window, int id) { SendMessageW(GetDlgItem(window, id), BM_CLICK, 0, 0); }
+void chooseLanguage(HWND window, int index) {
+    SendDlgItemMessageW(window, IDC_LANGUAGE, CB_SETCURSEL, index, 0);
+    SendMessageW(window, WM_COMMAND, MAKEWPARAM(IDC_LANGUAGE, CBN_SELCHANGE), reinterpret_cast<LPARAM>(GetDlgItem(window, IDC_LANGUAGE)));
+}
 void dragGain(HWND window, int id, int percent, WPARAM reason = TB_THUMBTRACK) {
     SendDlgItemMessageW(window, id, TBM_SETPOS, TRUE, percent);
     SendMessageW(window, WM_HSCROLL, reason, reinterpret_cast<LPARAM>(GetDlgItem(window, id)));
@@ -84,12 +88,13 @@ bool screenshot(HWND window, const std::wstring& path) {
 int main(int argc, char** argv) {
     SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     if (argc < 2) return 2;
-    bool capture = false, liveUpdates = false, gainProbe = false; std::filesystem::path imagePath;
+    bool capture = false, liveUpdates = false, gainProbe = false; std::filesystem::path imagePath, localeImages;
     for (int i = 2; i < argc; ++i) {
         if (std::string(argv[i]) == "--capture") capture = true;
         else if (std::string(argv[i]) == "--gain-probe") gainProbe = capture = true;
         else if (std::string(argv[i]) == "--updates") liveUpdates = true;
         else if (std::string(argv[i]) == "--screenshot" && i + 1 < argc) imagePath = argv[++i];
+        else if (std::string(argv[i]) == "--locale-screenshots" && i + 1 < argc) localeImages = argv[++i];
     }
     const auto configRoot = std::filesystem::absolute(argv[1]).parent_path() / "plugin-test-config";
     std::filesystem::create_directories(configRoot);
@@ -104,6 +109,7 @@ int main(int argc, char** argv) {
     WritePrivateProfileStringW(L"Applications", L"App0", appPath.c_str(), file.c_str());
     WritePrivateProfileStringW(L"Applications", L"App1", secondPath.c_str(), file.c_str());
     WritePrivateProfileStringW(L"SoundBridge", L"AutoCheckUpdates", L"0", file.c_str());
+    WritePrivateProfileStringW(L"SoundBridge", L"Language", L"zh-CN", file.c_str());
     HMODULE module = LoadLibraryA(argv[1]);
     if (!module) { std::cerr << "LoadLibrary failed: " << GetLastError() << '\n'; return 1; }
     auto shutdown = symbol<void(*)()>(module, "ts3plugin_shutdown");
@@ -128,6 +134,8 @@ int main(int argc, char** argv) {
         functions.setClientSelfVariableAsInt = setClientValue; functions.setPreProcessorConfigValue = setPreprocessor;
         setFunctions(functions);
         check(api() == 26 && offers() == 1 && init() == 0, "API 26 initialization and settings entry point");
+        const auto description = symbol<const char*(*)()>(module, "ts3plugin_description");
+        const auto retainedDescription = description(); const std::string originalDescription = retainedDescription;
         PluginMenuItem** items = nullptr; char* icon = nullptr; menus(&items, &icon);
         check(items && items[0] && items[1] && items[2] && items[3] && !items[4], "SDK-compatible menu array including manual updates");
         check(icon && std::string(icon) == "icon-32.png", "SVG-derived plugin menu icon");
@@ -151,6 +159,38 @@ int main(int argc, char** argv) {
             "display toggle takes effect and saves immediately");
         check(GetPrivateProfileIntW(L"SoundBridge", L"AutoCheckUpdates", 1, file.c_str()) == 0,
             "display toggle does not apply unrelated preference drafts");
+        const wchar_t* codes[] = {L"en", L"zh-CN", L"zh-TW", L"ko", L"ja"};
+        const wchar_t* starts[] = {L"Start sharing", L"开始共享", L"開始分享", L"공유 시작", L"共有開始"};
+        check(SendDlgItemMessageW(window, IDC_LANGUAGE, CB_GETCOUNT, 0, 0) == 5, "GUI offers five languages");
+        if (!localeImages.empty()) std::filesystem::create_directories(localeImages);
+        const auto hotkeys = symbol<void(*)(PluginHotkey***)>(module, "ts3plugin_initHotkeys");
+        click(window, IDC_MODE_SELECTED);
+        for (int i = 0; i < 5; ++i) {
+            chooseLanguage(window, i);
+            check(std::string(retainedDescription) == originalDescription && MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                description(), -1, nullptr, 0) > 0, "localized SDK descriptions remain valid across language changes");
+            check(controlText(window, IDC_START) == starts[i], "language selection updates controls immediately");
+            check(controlText(window, IDC_AUTO_UPDATE).find(L'*') != std::wstring::npos && IsWindowEnabled(GetDlgItem(window, IDC_APPLY)),
+                "language switching retains unrelated drafts and pending indication");
+            wchar_t saved[85]{}; GetPrivateProfileStringW(L"SoundBridge", L"Language", L"", saved, 85, file.c_str());
+            check(std::wstring(saved) == codes[i] && GetPrivateProfileIntW(L"SoundBridge", L"AutoCheckUpdates", 1, file.c_str()) == 0,
+                "language saves immediately without committing pending changes");
+            check(IsDlgButtonChecked(window, IDC_MODE_SELECTED) == BST_CHECKED &&
+                GetPrivateProfileIntW(L"SoundBridge", L"Mode", 0, file.c_str()) == 0 &&
+                GetPrivateProfileIntW(L"Applications", L"Count", 0, file.c_str()) == 2,
+                "language switching keeps the source draft and saved application choices");
+            PluginMenuItem** translated = nullptr; char* menuIcon = nullptr; menus(&translated, &menuIcon);
+            check(translated && translated[0] && translated[0]->text[0] && MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                translated[0]->text, -1, nullptr, 0) > 0, "localized SDK menu is valid UTF-8");
+            if (translated) { for (int j = 0; translated[j]; ++j) freeMemory(translated[j]); freeMemory(translated); } freeMemory(menuIcon);
+            PluginHotkey** keys = nullptr; hotkeys(&keys);
+            check(keys && keys[0] && keys[1] && keys[2] && !keys[3] && std::string(keys[0]->keyword) == "toggle-share" &&
+                MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, keys[2]->description, -1, nullptr, 0) > 0, "localized hotkeys retain binding identifiers and valid UTF-8");
+            if (keys) { for (int j = 0; keys[j]; ++j) freeMemory(keys[j]); freeMemory(keys); }
+            if (!localeImages.empty()) { Sleep(100); check(screenshot(window, (std::filesystem::absolute(localeImages) / (std::wstring(codes[i]) + L".png")).wstring()), "localized GUI screenshot rendered"); }
+        }
+        chooseLanguage(window, 1);
+        click(window, IDC_MODE_ALL);
         click(window, IDC_AUTO_UPDATE);
         check(!IsWindowEnabled(GetDlgItem(window, IDC_APPLY)), "reverting a draft clears pending state");
         check(SendDlgItemMessageW(window, IDC_DESKTOP_METER, PBM_GETPOS, 0, 0) == 0 &&
@@ -190,12 +230,20 @@ int main(int argc, char** argv) {
         check(GetPrivateProfileIntW(L"SoundBridge", L"MicrophonePercent", 0, file.c_str()) == 50, "GUI gain persisted");
         click(window, IDC_START);
         check(wait([&] { return status(window).find(L"先连接") != std::wstring::npos; }), "disconnected start reported in GUI");
+        chooseLanguage(window, 0);
+        check(status(window).find(L"Connect to a TS3 server") != std::wstring::npos, "existing engine error changes language without restarting capture");
+        chooseLanguage(window, 1);
         if (capture) {
             connected.store(true); muted.store(1); click(window, IDC_START);
             check(wait([&] { return status(window).find(L"静音") != std::wstring::npos; }), "muted start rejected in GUI");
             muted.store(0); click(window, IDC_START);
             const auto active = [&] { short value = 10000; int bits = 2; edit(42, &value, 1, 1, &bits); return value == 5000 && bits == 3; };
             if (!wait(active)) throw std::runtime_error("Real capture did not start against mocked SDK");
+            for (int i = 0; i < 5; ++i) {
+                chooseLanguage(window, i);
+                check(active(), "language switching preserves active capture and PCM gain");
+            }
+            chooseLanguage(window, 1);
             click(window, IDC_MODE_SELECTED);
             dragGain(window, IDC_MIC_SLIDER, 150);
             check(wait([&] { short value = 10000; int bits = 2; edit(42, &value, 1, 1, &bits); return value == 15000; }),
@@ -328,9 +376,12 @@ int main(int argc, char** argv) {
             click(window, IDC_AUTO_UPDATE);
             if (capture) click(window, IDC_STOP);
         }
+        chooseLanguage(window, 4);
         shutdown(); check(!IsWindow(window), "shutdown joins GUI and destroys window");
         check(init() == 0, "reload after GUI shutdown"); configure(nullptr, nullptr);
         check(wait([] { return dialog() && IsWindowVisible(dialog()); }), "GUI opens after plugin reload");
+        check(controlText(dialog(), IDC_START) == starts[4] && SendDlgItemMessageW(dialog(), IDC_LANGUAGE, CB_GETCURSEL, 0, 0) == 4,
+            "language preference survives plugin reload");
         check(IsDlgButtonChecked(dialog(), IDC_SHOW_METERS) == BST_CHECKED, "display preference survives plugin reload");
         check(SendDlgItemMessageW(dialog(), IDC_MIC_SLIDER, TBM_GETPOS, 0, 0) == GetPrivateProfileIntW(L"SoundBridge", L"MicrophonePercent", 0, file.c_str()), "saved settings restored by plugin reload");
         pcm = 10000; flags = 2; edit(42, &pcm, 1, 1, &flags);

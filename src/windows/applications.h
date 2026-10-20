@@ -1,4 +1,5 @@
 #pragma once
+#include "localization.h"
 #include <Windows.h>
 #include <cstdint>
 #include <string>
@@ -22,5 +23,5 @@ std::vector<AudioApplication> audioApplications(DWORD excludedPid);
 // Pure resolver: deduplicate overlapping process trees and reject any tree
 // containing this TS3 process. Errors never fall back to whole-system capture.
 std::vector<ProcessInfo> selectRoots(const std::vector<ProcessInfo>& processes,
-    const std::vector<std::wstring>& selectedPaths, DWORD excludedPid, std::wstring& error);
+    const std::vector<std::wstring>& selectedPaths, DWORD excludedPid, Message& error);
 }

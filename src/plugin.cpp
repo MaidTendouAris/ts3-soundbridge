@@ -4,11 +4,13 @@
 #include <ts3_functions.h>
 #include <teamspeak/public_errors.h>
 #include <cstdlib>
+#include <array>
 #include <cstring>
 #include <memory>
 #include <mutex>
 
 #define SB_EXPORT extern "C" __declspec(dllexport)
+using soundbridge::Text;
 namespace {
 TS3Functions ts3{};
 std::mutex lifecycle;
@@ -17,13 +19,13 @@ std::unique_ptr<soundbridge::SettingsWindow> window;
 std::unique_ptr<soundbridge::UpdateChecker> updates;
 std::wstring settingsFile;
 std::string pluginId;
-bool validateServer(std::uint64_t server, std::wstring& error) {
+bool validateServer(std::uint64_t server, soundbridge::Message& error) {
     int status = 0, muted = 1;
     if (!server || ts3.getConnectionStatus(server, &status) != ERROR_ok || status != STATUS_CONNECTION_ESTABLISHED) {
-        error = L"请先连接 TS3 服务器，再开始共享。"; return false;
+        error = Text::ConnectFirst; return false;
     }
     if (ts3.getClientSelfVariableAsInt(server, CLIENT_INPUT_MUTED, &muted) != ERROR_ok || muted) {
-        error = L"TS3 麦克风已静音，共享停止。取消静音后请手动开始。"; return false;
+        error = Text::NativeMuted; return false;
     }
     return true;
 }
@@ -44,7 +46,15 @@ SB_EXPORT const char* ts3plugin_version() { return SOUNDBRIDGE_VERSION_STRING; }
 SB_EXPORT int ts3plugin_apiVersion() { return 26; }
 SB_EXPORT const char* ts3plugin_author() { return "MaidTendouAris"; }
 SB_EXPORT const char* ts3plugin_description() {
-    return "通过设置窗口共享全部非 TS3 声音，或同时共享多个指定应用；保留麦克风原有发言规则。";
+    // The SDK may retain this pointer. Keep all localized descriptions alive
+    // across language changes and calls from different TS3 threads.
+    static const auto descriptions = [] {
+        std::array<std::string, static_cast<int>(soundbridge::Language::Count)> result;
+        for (int i = 0; i < static_cast<int>(result.size()); ++i)
+            result[i] = soundbridge::utf8(soundbridge::tr(Text::Description, static_cast<soundbridge::Language>(i)));
+        return result;
+    }();
+    return descriptions[static_cast<int>(soundbridge::currentLanguage())].c_str();
 }
 SB_EXPORT void ts3plugin_setFunctionPointers(const TS3Functions functions) { ts3 = functions; }
 SB_EXPORT int ts3plugin_init() {
@@ -54,15 +64,17 @@ SB_EXPORT int ts3plugin_init() {
     try {
         settingsFile = configFile();
         if (settingsFile.empty()) return 1;
-        engine = std::make_unique<soundbridge::BridgeEngine>(soundbridge::loadSettings(settingsFile), validateServer);
+        auto settings = soundbridge::loadSettings(settingsFile);
+        soundbridge::setLanguage(settings.language);
+        engine = std::make_unique<soundbridge::BridgeEngine>(std::move(settings), validateServer);
         updates = std::make_unique<soundbridge::UpdateChecker>(settingsFile, engine->settings().autoCheckUpdates, [](const auto& result) {
             if (ts3.printMessageToCurrentTab) {
-                const std::string message = "[SoundBridge] 发现新版 " + result.version + "，请在设置窗口打开 GitHub Releases 下载页。";
+                const auto message = soundbridge::utf8(soundbridge::format(Text::UpdateNotification, {std::wstring(result.version.begin(), result.version.end())}));
                 ts3.printMessageToCurrentTab(message.c_str());
             }
         });
         window = std::make_unique<soundbridge::SettingsWindow>(*engine, *updates, settingsFile, [] { return ts3.getCurrentServerConnectionHandlerID(); });
-        if (ts3.printMessageToCurrentTab) ts3.printMessageToCurrentTab("[SoundBridge] 已加载，共享默认关闭。通过插件菜单或插件管理页的“设置”打开窗口。");
+        if (ts3.printMessageToCurrentTab) ts3.printMessageToCurrentTab(soundbridge::utf8(soundbridge::tr(Text::Loaded)).c_str());
         return 0;
     } catch (...) { window.reset(); updates.reset(); engine.reset(); return 1; }
 }
@@ -99,12 +111,12 @@ SB_EXPORT void ts3plugin_initMenus(PluginMenuItem*** items, char** icon) {
     *icon = _strdup("icon-32.png");
     *items = static_cast<PluginMenuItem**>(std::calloc(5, sizeof(PluginMenuItem*)));
     if (!*items) return;
-    const char* labels[] = { "SoundBridge 设置…", "开始音频共享", "停止音频共享", "检查更新…" };
+    const Text labels[] = {Text::MenuSettings, Text::MenuStart, Text::MenuStop, Text::MenuUpdate};
     for (int i = 0; i < 4; ++i) {
         (*items)[i] = static_cast<PluginMenuItem*>(std::calloc(1, sizeof(PluginMenuItem)));
         if (!(*items)[i]) break;
         (*items)[i]->type = PLUGIN_MENU_TYPE_GLOBAL; (*items)[i]->id = i + 1;
-        strcpy_s((*items)[i]->text, labels[i]);
+        strcpy_s((*items)[i]->text, soundbridge::utf8(soundbridge::tr(labels[i])).c_str());
         if (i == 0) strcpy_s((*items)[i]->icon, "icon-32.png");
     }
 }
@@ -121,11 +133,11 @@ SB_EXPORT void ts3plugin_initHotkeys(PluginHotkey*** keys) {
     *keys = static_cast<PluginHotkey**>(std::calloc(4, sizeof(PluginHotkey*)));
     if (!*keys) return;
     const char* names[] = { "toggle-share", "toggle-mic", "open-settings" };
-    const char* labels[] = { "开始 / 停止音频共享", "切换麦克风独立静音", "打开 SoundBridge 设置" };
+    const Text labels[] = {Text::HotkeyShare, Text::HotkeyMic, Text::HotkeySettings};
     for (int i = 0; i < 3; ++i) {
         (*keys)[i] = static_cast<PluginHotkey*>(std::calloc(1, sizeof(PluginHotkey)));
         if (!(*keys)[i]) break;
-        strcpy_s((*keys)[i]->keyword, names[i]); strcpy_s((*keys)[i]->description, labels[i]);
+        strcpy_s((*keys)[i]->keyword, names[i]); strcpy_s((*keys)[i]->description, soundbridge::utf8(soundbridge::tr(labels[i])).c_str());
     }
 }
 SB_EXPORT void ts3plugin_onHotkeyEvent(const char* keyword) {

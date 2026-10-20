@@ -58,7 +58,7 @@ bool ancestor(DWORD parent, DWORD child, const std::map<DWORD, const ProcessInfo
 }
 }
 std::vector<ProcessInfo> selectRoots(const std::vector<ProcessInfo>& processes,
-    const std::vector<std::wstring>& selectedPaths, DWORD excludedPid, std::wstring& error) {
+    const std::vector<std::wstring>& selectedPaths, DWORD excludedPid, Message& error) {
     error.clear();
     std::map<DWORD, const ProcessInfo*> byPid;
     for (const auto& process : processes) byPid[process.pid] = &process;
@@ -67,7 +67,7 @@ std::vector<ProcessInfo> selectRoots(const std::vector<ProcessInfo>& processes,
         if (!process.pid || process.path.empty() || !process.created) continue;
         for (const auto& path : selectedPaths) if (samePath(path, process.path)) {
             if (ancestor(process.pid, excludedPid, byPid) || ancestor(excludedPid, process.pid, byPid)) {
-                error = L"不能共享 TeamSpeak 或包含 TeamSpeak 的进程树。"; return {};
+                error = Text::RejectTeamSpeak; return {};
             }
             candidates.push_back(process); break;
         }
@@ -83,7 +83,7 @@ std::vector<ProcessInfo> selectRoots(const std::vector<ProcessInfo>& processes,
         if (!covered && std::none_of(roots.begin(), roots.end(), [&](const auto& root) { return root.pid == process.pid; })) roots.push_back(process);
     }
     std::sort(roots.begin(), roots.end(), [](const auto& first, const auto& second) { return first.pid < second.pid; });
-    if (roots.size() > 16) { error = L"所选应用超过 16 个独立进程树，请减少选择。"; return {}; }
+    if (roots.size() > 16) { error = Text::TooManyTrees; return {}; }
     return roots;
 }
 std::vector<AudioApplication> audioApplications(DWORD excludedPid) {

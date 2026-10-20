@@ -1,4 +1,5 @@
 #pragma once
+#include "localization.h"
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -7,6 +8,7 @@ namespace soundbridge {
 inline constexpr int MaximumGainPercent = 300;
 enum class CaptureMode { AllOtherAudio, SelectedApplications };
 struct Settings {
+    Language language = systemLanguage();
     CaptureMode mode = CaptureMode::AllOtherAudio;
     int desktopPercent = 50;
     int microphonePercent = 100;
