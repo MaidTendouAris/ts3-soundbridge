@@ -6,7 +6,7 @@
 - 中文描述：**TS3 实时声音桥**
 - 建议目录名：`ts3-soundbridge`
 - 文档日期：2026-10-20
-- 当前阶段：1.1.3 多语言版完成本机构建与验证，正在按正式发布流程同步源码及安装包。支持英文、简中、繁中、韩语和日语即时切换，保留紧凑窗口及实时音量；Release 仍只附安装包及校验文件。真实 TS3 频道测试仍待进行。
+- 当前阶段：1.1.3 多语言版已正式发布，源码已同步。支持英文、简中、繁中、韩语和日语即时切换，保留紧凑窗口及实时音量。本机五组测试、GitHub 构建／发布与正式包复验通过；Release 只附安装包及校验文件。真实 TS3 频道测试仍待进行。
 - 文档用途：保存需求、技术判断及待定事项，供新会话继续处理。
 
 ## 1. 原始需求与当前授权范围
@@ -349,4 +349,4 @@ RP-Soundboard 的 `TalkStateManager` 会在播放时临时切换为持续发送�
 - 切换时只提交语言与已应用状态，保留来源和偏好草稿、复选框及星号；不重建采集。字体按语言选择，窗口维持 540×332 DLU，本机 1440P／150% 下仍为 1233×877 像素。
 - 五组 CTest、五种语言窗口渲染、有效 UTF-8、占位符、地区识别／回退、语言偏好重载及原有音频／更新回归通过。真实 Windows 回环配合模拟 SDK，不连接服务器或保存音频。
 
-正式发布与安装包复验结果将在完成后补充；Release 仍仅附安装包与校验文件，不单独上传 SVG、PNG 或 ICO。
+正式发布：[v1.1.3](https://github.com/MaidTendouAris/ts3-soundbridge/releases/tag/v1.1.3)，源码 `dc0c8ef5cafb3a924c011c4b2c38b8e6bbbf072c`。GitHub [构建检查](https://github.com/MaidTendouAris/ts3-soundbridge/actions/runs/39424475928) 与 [发布工作流](https://github.com/MaidTendouAris/ts3-soundbridge/actions/runs/39424476539) 均通过；API 确认只有安装包与 SHA256SUMS 两个附件，没有独立 SVG、PNG 或 ICO。重新下载正式包，核对摘要、7 文件结构、1.1.3 元数据／DLL、SVG 和许可证；包内实际 DLL 的 `--gain-probe --updates --locale-screenshots` 通过。共享期间五种语言轮换保持 PCM 增益，50%／300%／0% 输出与电平正确，真实 GitHub 手动更新成功。本地 dist 已同步正式包，SHA-256 为 `a87d6ca9dbe10906b984eabbbce84b47ae619a5a48a898d29cfc7be5b23611af`。

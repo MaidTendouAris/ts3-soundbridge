@@ -12,7 +12,12 @@ Release x64 构建与五组 CTest（新增 `localization`）通过。多语言�
 
 真实 Windows 回环配合模拟 TS3 SDK 的 `--gain-probe --updates` 通过：活动采集期间轮换五种语言保持 PCM 与增益有效，50%／300%／0% 实时增益与电平、显示开关、最小化／隐藏、静音／断线／标签切换、窗口生命周期及真实 GitHub 手动检查。没有连接服务器或保存音频。真实 TS3 频道、PTT／VAD、长期音质与设备自动恢复仍待实测。
 
-发布与正式包的验证结果在发布完成后记录。
+GitHub [构建检查](https://github.com/MaidTendouAris/ts3-soundbridge/actions/runs/39424475928) 与 [发布工作流](https://github.com/MaidTendouAris/ts3-soundbridge/actions/runs/39424476539) 均成功；正式 [v1.1.3](https://github.com/MaidTendouAris/ts3-soundbridge/releases/tag/v1.1.3) 对应源码 `dc0c8ef5cafb3a924c011c4b2c38b8e6bbbf072c`。Release 只有安装包和校验文件，没有独立图标附件。已重新下载并核对资产摘要、7 文件结构、1.1.3 元数据／DLL、SVG 和许可证；用包内实际 DLL 运行 `--gain-probe --updates --locale-screenshots`，五语言、活动采集、实时增益、电平和真实手动更新检查通过。本地 dist 已同步正式包。
+
+```text
+TS3-SoundBridge-1.1.3-win64.ts3_plugin
+SHA256: a87d6ca9dbe10906b984eabbbce84b47ae619a5a48a898d29cfc7be5b23611af
+```
 
 ## 1.1.2（2026-10-17）
 
